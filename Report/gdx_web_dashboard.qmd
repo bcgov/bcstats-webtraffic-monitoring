@@ -1,0 +1,975 @@
+---
+title: "BC Stats Web Traffic Monitoring"
+logo: "www/bcstats_logo_rev.png"
+format: 
+  dashboard:
+    theme:
+      - litera
+      - theme.scss
+    orientation: rows
+    embed-resources: true
+    nav-buttons:
+      - icon: github
+        href: https://github.com/bcgov/bcstats-webtraffic-monitoring
+---
+
+<!-- 
+HOW TO RUN THIS DASHBOARD FOR CODE REVIEW:
+Option 1: In Positron or RStudio, open this file and click the "Render" button at the top.
+Option 2: Run the following in the R Console: `quarto::quarto_render("Report/gdx_web_dashboard.qmd")`
+Option 3: Run the following in the Terminal: `quarto preview Report/gdx_web_dashboard.qmd`
+
+Data is produced by R/gdx-02-analyze.R, which writes the cmslite_*.csv
+tables to OUTPUT_TABLES.
+-->
+
+```{r setup, include=FALSE}
+library(readr)
+library(dplyr)
+library(purrr)
+library(knitr)
+library(ggplot2)
+library(forcats)
+library(plotly)
+library(lubridate)
+library(safepaths)
+library(glue)
+library(DT)
+library(scales)
+library(crosstalk)
+library(htmltools)
+
+`%||%` <- function(a, b) if (is.null(a)) b else a
+
+# Resolve OUTPUT_TABLES the same way 00-setup.R does.
+LAN_FOLDER <- use_network_path()
+PROJECT_ROOT <- glue("{LAN_FOLDER}/0. Misc/Data Science Tooling/web-hosting-and-dashboards/shinyapps_webtraffic_monitoring")
+OUTPUT_TABLES <- glue("{PROJECT_ROOT}/outputs/tables")
+
+# Read month-partitioned CMS Lite summary tables if they exist; otherwise fall
+# back to the legacy flat files so older outputs still render.
+cmslite_root <- file.path(OUTPUT_TABLES, "cms_lite")
+cmslite_months <- if (dir.exists(cmslite_root)) {
+  sort(list.dirs(cmslite_root, recursive = FALSE, full.names = FALSE))
+} else {
+  character()
+}
+
+# Optional cap so a historical render reflects what was known as of that month.
+# Without it the dashboard always treats the newest month on disk as current,
+# which would make a backfilled July render headline August.
+dashboard_max_month <- Sys.getenv("GDX_DASHBOARD_MAX_MONTH", unset = "")
+if (nzchar(dashboard_max_month) && length(cmslite_months) > 0) {
+  kept <- cmslite_months[cmslite_months <= dashboard_max_month]
+  if (length(kept) == 0) {
+    stop(
+      sprintf(
+        "GDX_DASHBOARD_MAX_MONTH=%s excludes every available month (%s).",
+        dashboard_max_month,
+        paste(cmslite_months, collapse = ", ")
+      ),
+      call. = FALSE
+    )
+  }
+  cmslite_months <- kept
+}
+
+cmslite_month_label <- function(month) {
+  format(as.Date(paste0(month, "-01")), "%B %Y")
+}
+
+read_cmslite_month <- function(name, month) {
+  path <- file.path(cmslite_root, month, sprintf("%s_%s.csv", name, month))
+  if (file.exists(path)) {
+    read_csv(path, show_col_types = FALSE)
+  } else {
+    NULL
+  }
+}
+
+read_cmslite_legacy <- function(name) {
+  path <- file.path(OUTPUT_TABLES, paste0(name, ".csv"))
+  if (file.exists(path)) {
+    read_csv(path, show_col_types = FALSE)
+  } else {
+    NULL
+  }
+}
+
+load_cmslite_monthly <- function(name) {
+  if (length(cmslite_months) > 0) {
+    out <- map(cmslite_months, \(m) read_cmslite_month(name, m))
+    names(out) <- cmslite_months
+    out[!map_lgl(out, is.null)]
+  } else {
+    legacy <- read_cmslite_legacy(name)
+    if (is.null(legacy)) list() else list(legacy = legacy)
+  }
+}
+
+bind_cmslite_monthly <- function(name) {
+  tbls <- load_cmslite_monthly(name)
+  if (length(tbls) == 0) {
+    return(NULL)
+  }
+
+  list_rbind(
+    imap(tbls, \(x, month) dplyr::mutate(x, month = month, month_label = cmslite_month_label(month), .before = 1))
+  )
+}
+
+month_site_dropdown_barh <- function(data, label_col, value_col, value_name,
+                                     title_prefix, top_n = 15, pre_aggregate = FALSE) {
+  month_list <- sort(unique(data$month))
+  site_list <- sort(unique(data$site))
+  has_full <- "full_label" %in% names(data)
+
+  prep_combo <- function(m, s) {
+    d <- data |> filter(month == m, site == s)
+    if (pre_aggregate) {
+      group_cols <- if (has_full) c(label_col, "full_label") else label_col
+      d <- d |>
+        summarize(
+          !!value_col := sum(.data[[value_col]], na.rm = TRUE),
+          .by = all_of(group_cols)
+        )
+    }
+    d |>
+      arrange(desc(.data[[value_col]])) |>
+      slice_head(n = top_n) |>
+      # Plotly horizontal bars render first row at the bottom; keep ascending
+      # order in traces so highest value appears at the top.
+      arrange(.data[[value_col]])
+  }
+
+  combos <- expand.grid(month = month_list, site = site_list, stringsAsFactors = FALSE)
+  data_by_combo <- map2(combos$month, combos$site, prep_combo)
+  combo_names <- paste(combos$month, combos$site, sep = "__")
+  names(data_by_combo) <- combo_names
+
+  default_month <- month_list[length(month_list)]
+  default_site <- site_list[1]
+  default_name <- paste(default_month, default_site, sep = "__")
+
+  p <- plot_ly()
+  for (nm in combo_names) {
+    d <- data_by_combo[[nm]]
+    p <- add_bars(
+      p,
+      x = d[[value_col]],
+      y = d[[label_col]],
+      orientation = "h",
+      visible = nm == default_name,
+      marker = list(color = "#2F6B3F", line = list(color = "white", width = 0.5), opacity = 0.9),
+      customdata = if (has_full) d$full_label else d[[label_col]],
+      hovertemplate = paste0("<b>%{customdata}</b><br>", value_name, ": %{x:,}<extra></extra>"),
+      showlegend = FALSE
+    )
+  }
+
+  month_buttons <- lapply(month_list, function(m) {
+    vis <- map_lgl(combo_names, ~startsWith(.x, paste0(m, "__")))
+    d <- data_by_combo[[paste(m, default_site, sep = "__")]]
+    list(
+      method = "update",
+      args = list(
+        list(visible = as.list(vis)),
+        list(
+          title = list(
+            text = paste0("<b>", title_prefix, " – ", cmslite_month_label(m), "</b>"),
+            font = modifyList(bc_font, list(size = 15, color = "#003366"))
+          ),
+          yaxis = list(
+            title = "", automargin = TRUE,
+            tickfont = modifyList(bc_font, list(size = 10, color = "#2d2d2d"))
+          )
+        )
+      ),
+      label = cmslite_month_label(m)
+    )
+  })
+
+  site_buttons <- lapply(site_list, function(s) {
+    vis <- map_lgl(combo_names, ~endsWith(.x, paste0("__", s)))
+    d <- data_by_combo[[paste(default_month, s, sep = "__")]]
+    list(
+      method = "update",
+      args = list(
+        list(visible = as.list(vis)),
+        list(
+          title = list(
+            text = paste0("<b>", title_prefix, " – ", site_short(s), "</b>"),
+            font = modifyList(bc_font, list(size = 15, color = "#003366"))
+          ),
+          yaxis = list(
+            title = "", automargin = TRUE,
+            tickfont = modifyList(bc_font, list(size = 10, color = "#2d2d2d"))
+          )
+        )
+      ),
+      label = site_short(s)
+    )
+  })
+
+  default_d <- data_by_combo[[default_name]]
+
+  p |>
+    layout(
+      title = list(
+        text = paste0("<b>", title_prefix, " – ", cmslite_month_label(default_month), "</b>"),
+        font = modifyList(bc_font, list(size = 15, color = "#003366"))
+      ),
+      xaxis = list(title = "", gridcolor = "#e8ecf0", zeroline = FALSE,
+                   tickfont = modifyList(bc_font, list(size = 10, color = "#5c6b7a"))),
+      yaxis = list(title = "", automargin = TRUE,
+                   tickfont = modifyList(bc_font, list(size = 10, color = "#2d2d2d")),
+                   categoryorder = "trace"),
+      updatemenus = list(
+        list(
+          type = "dropdown", direction = "down",
+          x = 0.0, xanchor = "left", y = 1.36, yanchor = "top",
+          buttons = month_buttons,
+          active = length(month_list) - 1L,
+          showactive = TRUE, bgcolor = "#f5f8fb", bordercolor = "#c8d8e8",
+          font = modifyList(bc_font, list(size = 11))
+        ),
+        list(
+          type = "dropdown", direction = "down",
+          x = 0.32, xanchor = "left", y = 1.36, yanchor = "top",
+          buttons = site_buttons,
+          active = 0L,
+          showactive = TRUE, bgcolor = "#f5f8fb", bordercolor = "#c8d8e8",
+          font = modifyList(bc_font, list(size = 11))
+        )
+      ),
+      plot_bgcolor = "#ffffff", paper_bgcolor = "#ffffff",
+      margin = list(l = 10, r = 30, t = 115, b = 30), bargap = 0.3
+    ) |>
+    config(
+      displaylogo = plotly_config$displaylogo,
+      modeBarButtonsToRemove = plotly_config$modeBarButtonsToRemove,
+      responsive = plotly_config$responsive
+    )
+}
+
+daily_by_month <- load_cmslite_monthly("cmslite_daily")
+top_pages_by_month <- load_cmslite_monthly("cmslite_top_pages")
+clicks_daily_by_month <- load_cmslite_monthly("cmslite_clicks_daily")
+top_targets_by_month <- load_cmslite_monthly("cmslite_top_targets")
+top_referrers_by_month <- load_cmslite_monthly("cmslite_top_referrers")
+by_os_by_month <- load_cmslite_monthly("cmslite_by_os")
+by_geo_by_month <- load_cmslite_monthly("cmslite_by_geo")
+asset_daily_by_month <- load_cmslite_monthly("cmslite_asset_downloads_daily")
+top_assets_by_month <- load_cmslite_monthly("cmslite_top_assets")
+search_terms_by_month <- load_cmslite_monthly("cmslite_search_terms")
+google_queries_by_month <- load_cmslite_monthly("cmslite_google_queries")
+
+daily          <- bind_cmslite_monthly("cmslite_daily")
+top_pages      <- bind_cmslite_monthly("cmslite_top_pages")
+clicks_daily   <- bind_cmslite_monthly("cmslite_clicks_daily")
+top_targets    <- bind_cmslite_monthly("cmslite_top_targets")
+top_referrers  <- bind_cmslite_monthly("cmslite_top_referrers")
+by_os          <- bind_cmslite_monthly("cmslite_by_os")
+by_geo         <- bind_cmslite_monthly("cmslite_by_geo")
+asset_daily    <- bind_cmslite_monthly("cmslite_asset_downloads_daily")
+top_assets     <- bind_cmslite_monthly("cmslite_top_assets")
+search_terms   <- bind_cmslite_monthly("cmslite_search_terms")
+google_queries <- bind_cmslite_monthly("cmslite_google_queries")
+
+# Sites present in the data (data-driven).
+sites <- sort(unique(daily$site))
+
+# Use discovered month partitions as the source of truth.
+months_available <- names(daily_by_month)
+cmslite_months <- sort(months_available)
+current_month <- if (length(cmslite_months) > 0) tail(cmslite_months, 1) else NA_character_
+previous_month <- if (length(cmslite_months) > 1) cmslite_months[length(cmslite_months) - 1] else NA_character_
+current_month_str <- if (!is.na(current_month)) cmslite_month_label(current_month) else ""
+previous_month_str <- if (!is.na(previous_month)) cmslite_month_label(previous_month) else NA_character_
+
+# Proper web-property names. coalesce() keeps unknown sites working.
+site_label_map <- c(
+  all_sites  = "All Sites",
+  outcomes   = "Student Outcomes",
+  antiracism = "Anti-Racism Data Act",
+  govstats   = "BC Stats"
+)
+site_label <- function(s) coalesce(unname(site_label_map[s]), s)
+
+site_short_map <- c(
+  all_sites  = "All Sites",
+  outcomes   = "Student Outcomes",
+  antiracism = "Anti-Racism Data Act",
+  govstats   = "BC Stats"
+)
+site_short <- function(s) coalesce(unname(site_short_map[s]), s)
+
+# Underlying CMS platform per property (BC Stats is CMS Lite; the two bcstats
+# survey properties are WordPress sites).
+site_platform_map <- c(
+  outcomes   = "WordPress",
+  antiracism = "WordPress",
+  govstats   = "CMS Lite"
+)
+site_platform <- function(s) coalesce(unname(site_platform_map[s]), "")
+
+# BC-blue family palette, keyed by site, with grey fallback.
+site_palette_pool <- c("#003366", "#1F6B75", "#9E4C1A", "#6C3D8A", "#2F6B3F", "#B07D12")
+site_colors <- setNames(
+  site_palette_pool[seq_along(sites)],
+  sites
+)
+site_colors[is.na(site_colors)] <- "#888888"
+
+# Date range covered by the data (used in titles/subtitles).
+date_min <- min(daily$date, na.rm = TRUE)
+date_max <- max(daily$date, na.rm = TRUE)
+date_range_str <- if (format(date_min, "%Y-%m") == format(date_max, "%Y-%m")) {
+  format(date_min, "%B %Y")
+} else {
+  paste0(format(date_min, "%b %d, %Y"), " \u2013 ", format(date_max, "%b %d, %Y"))
+}
+
+# Sum a metric for a given month from month-partitioned list input.
+# Returns NA when that month or metric is absent.
+month_total <- function(monthly_tbls, value_col, month) {
+  if (is.null(monthly_tbls) || length(monthly_tbls) == 0 || is.na(month)) {
+    return(NA_real_)
+  }
+  d <- monthly_tbls[[month]]
+  if (is.null(d) || !value_col %in% names(d)) {
+    return(NA_real_)
+  }
+  sum(d[[value_col]], na.rm = TRUE)
+}
+
+# Build a "+/-% vs <label>" caption; empty string when the comparison is missing.
+delta_caption <- function(current, comparison, label) {
+  if (is.na(comparison) || comparison == 0 || is.na(current)) return("")
+  pct <- (current - comparison) / comparison
+  arrow <- if (pct >= 0) "\u25B2" else "\u25BC"
+  sprintf(" (%s%s vs %s)", arrow, percent(abs(pct), accuracy = 0.1), label)
+}
+
+# This-month totals across all sites (for value boxes).
+total_page_views <- month_total(daily_by_month, "page_views", current_month)
+total_sessions   <- month_total(daily_by_month, "sessions", current_month)
+total_clicks     <- month_total(clicks_daily_by_month, "clicks", current_month)
+
+previous_page_views <- month_total(daily_by_month, "page_views", previous_month)
+previous_sessions   <- month_total(daily_by_month, "sessions", previous_month)
+previous_clicks     <- month_total(clicks_daily_by_month, "clicks", previous_month)
+
+# Month-over-month delta captions (empty until multi-month data exists).
+pv_delta          <- delta_caption(total_page_views, previous_page_views, previous_month_str)
+sessions_delta    <- delta_caption(total_sessions, previous_sessions, previous_month_str)
+clicks_delta      <- delta_caption(total_clicks, previous_clicks, previous_month_str)
+
+# Engagement: page views per session (avoids the daily-unique over-count of users).
+pv_per_session <- if (!is.na(total_sessions) && total_sessions > 0) total_page_views / total_sessions else NA_real_
+previous_pv_per_session <- if (!is.na(previous_sessions) && previous_sessions > 0) previous_page_views / previous_sessions else NA_real_
+pv_per_session_delta <- delta_caption(pv_per_session, previous_pv_per_session, previous_month_str)
+
+# Shared Plotly branding helpers (match shinyapps_dashboard.qmd).
+bc_font <- list(family = "BC Sans, Segoe UI, Arial, sans-serif")
+
+plotly_config <- list(
+  displaylogo = FALSE,
+  modeBarButtonsToRemove = list(
+    "zoom2d", "pan2d", "select2d", "lasso2d",
+    "zoomIn2d", "zoomOut2d", "autoScale2d",
+    "hoverClosestCartesian", "hoverCompareCartesian"
+  ),
+  responsive = TRUE
+)
+
+# Shorten a long display URL for axis labels; full value kept for hover.
+# Intentionally used only by the Top Downloaded Assets chart now; the page,
+# referrer, and location charts display full labels.
+shorten_url <- function(x, max_chars = 55) {
+  x <- ifelse(is.na(x) | x == "" | x == "(not set)", "(unknown)", x)
+  # Drop scheme + host so the path stands out.
+  stripped <- sub("^https?://[^/]+", "", x)
+  stripped <- ifelse(stripped == "" | stripped == "/", x, stripped)
+  ifelse(
+    nchar(stripped) > max_chars,
+    paste0("\u2026", substr(stripped, nchar(stripped) - max_chars + 1, nchar(stripped))),
+    stripped
+  )
+}
+
+# Build a horizontal bar chart with a per-site dropdown (one trace per site).
+# `data` must have columns: site, <label_col>, <value_col>, and optionally
+# `full_label` (used for hover; falls back to <label_col>).
+# When `pre_aggregate = TRUE`, values are summed by label within each site before
+# ranking (e.g. region/country rows that repeat within a site).
+# Ordering is enforced per site via yaxis categoryarray so the largest value is
+# always at the top, including after switching sites via the dropdown.
+site_dropdown_barh <- function(data, label_col, value_col, value_name,
+                               title_prefix, top_n = 15, pre_aggregate = FALSE,
+                               show_dropdown = TRUE, include_all_sites = FALSE,
+                               default_site = NULL) {
+  site_list <- sort(unique(data$site))
+
+  # With a single source there is nothing to switch between, so suppress the
+  # dropdown and render a plain titled bar chart.
+  if (length(site_list) <= 1 && !include_all_sites) show_dropdown <- FALSE
+
+  has_full <- "full_label" %in% names(data)
+
+  prep_site <- function(s) {
+    is_all_sites <- identical(s, "all_sites")
+    d <- if (is_all_sites) data else data |> filter(site == s)
+
+    # Always aggregate duplicate labels for the All Sites view. Otherwise
+    # identical labels from different sites can show as separate bars.
+    if (pre_aggregate || is_all_sites) {
+      group_cols <- if (has_full) c(label_col, "full_label") else label_col
+      d <- d |>
+        summarize(
+          !!value_col := sum(.data[[value_col]], na.rm = TRUE),
+          .by = all_of(group_cols)
+        )
+    }
+
+    d |>
+      arrange(desc(.data[[value_col]])) |>
+      slice_head(n = top_n) |>
+      # Plotly horizontal bars render first row at the bottom; keep ascending
+      # order in traces so highest value appears at the top.
+      arrange(.data[[value_col]])
+  }
+
+  plot_sites <- if (include_all_sites) c("all_sites", site_list) else site_list
+  data_by_site <- lapply(plot_sites, prep_site)
+  names(data_by_site) <- plot_sites
+
+  if (is.null(default_site)) {
+    default_site <- if (include_all_sites) {
+      "all_sites"
+    } else {
+      data |>
+        summarize(v = sum(.data[[value_col]], na.rm = TRUE), .by = site) |>
+        slice_max(v, n = 1) |>
+        pull(site)
+    }
+  }
+
+  p <- plot_ly()
+  for (s in plot_sites) {
+    d <- data_by_site[[s]]
+    marker_color <- if (identical(s, "all_sites")) "#003366" else unname(site_colors[s])
+    p <- add_bars(
+      p,
+      x = d[[value_col]],
+      y = d[[label_col]],
+      orientation = "h",
+      visible = s == default_site,
+      marker = list(color = marker_color,
+                    line = list(color = "white", width = 0.5), opacity = 0.9),
+      customdata = if (has_full) d$full_label else d[[label_col]],
+      hovertemplate = paste0("<b>%{customdata}</b><br>", value_name, ": %{x:,}<extra></extra>"),
+      showlegend = FALSE
+    )
+  }
+
+  buttons <- lapply(seq_along(plot_sites), function(i) {
+    s <- plot_sites[i]
+    d <- data_by_site[[s]]
+    vis <- rep(FALSE, length(plot_sites))
+    vis[i] <- TRUE
+    list(
+      method = "update",
+      args = list(
+        list(visible = as.list(vis)),
+        list(
+          title = list(
+            text = paste0("<b>", title_prefix, " \u2013 ", site_short(s), "</b>"),
+            font = modifyList(bc_font, list(size = 15, color = "#003366"))
+          ),
+          yaxis = list(
+            title = "", automargin = TRUE,
+            tickfont = modifyList(bc_font, list(size = 10, color = "#2d2d2d"))
+          )
+        )
+      ),
+      label = site_short(s)
+    )
+  })
+
+  default_d <- data_by_site[[default_site]]
+
+  updatemenus <- if (show_dropdown) {
+    list(list(
+      type = "dropdown", direction = "down",
+      x = 0.0, xanchor = "left", y = 1.36, yanchor = "top",
+      buttons = buttons,
+      active = which(plot_sites == default_site) - 1L,
+      showactive = TRUE, bgcolor = "#f5f8fb", bordercolor = "#c8d8e8",
+      font = modifyList(bc_font, list(size = 11))
+    ))
+  } else {
+    list()
+  }
+
+  # Trim top margin when there is no dropdown occupying vertical space.
+  top_margin <- if (show_dropdown) 115 else 50
+
+  p |>
+    layout(
+      title = list(
+        text = paste0("<b>", title_prefix, if (show_dropdown) paste0(" \u2013 ", site_short(default_site)) else "", "</b>"),
+        font = modifyList(bc_font, list(size = 15, color = "#003366"))
+      ),
+      xaxis = list(title = "", gridcolor = "#e8ecf0", zeroline = FALSE,
+                   tickfont = modifyList(bc_font, list(size = 10, color = "#5c6b7a"))),
+      yaxis = list(title = "", automargin = TRUE,
+                   tickfont = modifyList(bc_font, list(size = 10, color = "#2d2d2d")),
+                   categoryorder = "trace"),
+      updatemenus = updatemenus,
+      plot_bgcolor = "#ffffff", paper_bgcolor = "#ffffff",
+      margin = list(l = 10, r = 30, t = top_margin, b = 30), bargap = 0.3
+    ) |>
+    config(
+      displaylogo = plotly_config$displaylogo,
+      modeBarButtonsToRemove = plotly_config$modeBarButtonsToRemove,
+      responsive = plotly_config$responsive
+    )
+}
+
+daily_site_dropdown_line <- function(data, value_col, value_name, title_prefix,
+                                     include_all_sites = TRUE,
+                                     default_site = if (include_all_sites) "all_sites" else NULL) {
+  site_list <- sort(unique(data$site))
+  plot_sites <- if (include_all_sites) c("all_sites", site_list) else site_list
+
+  prep_site <- function(s) {
+    d <- if (identical(s, "all_sites")) {
+      data |>
+        summarize(!!value_col := sum(.data[[value_col]], na.rm = TRUE), .by = date)
+    } else {
+      data |>
+        filter(site == s) |>
+        arrange(date)
+    }
+    d |>
+      arrange(date)
+  }
+
+  data_by_site <- lapply(plot_sites, prep_site)
+  names(data_by_site) <- plot_sites
+
+  if (is.null(default_site)) {
+    default_site <- plot_sites[1]
+  }
+
+  p <- plot_ly()
+  for (s in plot_sites) {
+    d <- data_by_site[[s]]
+    line_color <- if (identical(s, "all_sites")) "#003366" else unname(site_colors[s])
+    p <- add_trace(
+      p,
+      x = d$date, y = d[[value_col]], type = "scatter", mode = "lines",
+      name = site_short(s),
+      visible = s == default_site,
+      line = list(color = line_color, width = 2),
+      hovertemplate = paste0("<b>", site_short(s), "</b><br>%{x|%b %d, %Y}<br>", value_name, ": %{y:,}<extra></extra>")
+    )
+  }
+
+  buttons <- lapply(seq_along(plot_sites), function(i) {
+    s <- plot_sites[i]
+    vis <- rep(FALSE, length(plot_sites))
+    vis[i] <- TRUE
+    list(
+      method = "update",
+      args = list(
+        list(visible = as.list(vis)),
+        list(
+          title = list(
+            text = paste0("<b>", title_prefix, " – ", site_short(s), "</b>"),
+            font = modifyList(bc_font, list(size = 15, color = "#003366"))
+          )
+        )
+      ),
+      label = site_short(s)
+    )
+  })
+
+  p |>
+    layout(
+      title = list(
+        text = paste0("<b>", title_prefix, " – ", site_short(default_site), "</b>"),
+        font = modifyList(bc_font, list(size = 15, color = "#003366"))
+      ),
+      xaxis = list(title = "", gridcolor = "#e8ecf0", tickformat = "%b %d",
+                   tickfont = modifyList(bc_font, list(size = 11, color = "#2d2d2d"))),
+      yaxis = list(title = "", gridcolor = "#e8ecf0", automargin = TRUE,
+                   tickfont = modifyList(bc_font, list(size = 11, color = "#5c6b7a"))),
+      updatemenus = list(list(
+        type = "dropdown", direction = "down",
+        x = 0.0, xanchor = "left", y = 1.36, yanchor = "top",
+        buttons = buttons,
+        active = which(plot_sites == default_site) - 1L,
+        showactive = TRUE, bgcolor = "#f5f8fb", bordercolor = "#c8d8e8",
+        font = modifyList(bc_font, list(size = 11))
+      )),
+      plot_bgcolor = "#ffffff", paper_bgcolor = "#ffffff",
+      margin = list(l = 10, r = 20, t = 115, b = 50)
+    ) |>
+    config(
+      displaylogo = plotly_config$displaylogo,
+      modeBarButtonsToRemove = plotly_config$modeBarButtonsToRemove,
+      responsive = plotly_config$responsive
+    )
+}
+
+```
+
+# Summary {scrolling="true"}
+
+## Row {height=210px}
+
+::: {.valuebox color="primary" title="Page Views in `r current_month_str``r pv_delta`"}
+`r comma(total_page_views)`
+:::
+
+::: {.valuebox color="info" title="Sessions in `r current_month_str``r sessions_delta`"}
+`r comma(total_sessions)`
+:::
+
+::: {.valuebox color="secondary" title="Page Views per Session in `r current_month_str``r pv_per_session_delta`"}
+`r formatC(pv_per_session, format = "f", digits = 2)`
+:::
+
+::: {.valuebox color="success" title="Clicks in `r current_month_str``r clicks_delta`"}
+`r comma(total_clicks)`
+:::
+
+<!-- ::: {.callout-note appearance="minimal" collapse="true"}
+Value boxes show totals for the latest month across all three properties.
+Month-over-month change (▲/▼ %) appears automatically once more than one month of
+data is available.
+::: -->
+
+## Row {height=500px}
+
+### Daily Page Views by Site
+
+```{r}
+daily_site_dropdown_line(
+  daily,
+  value_col = "page_views",
+  value_name = "Page views",
+  title_prefix = paste0("Daily Page Views (", date_range_str, ")"),
+  include_all_sites = TRUE,
+  default_site = "all_sites"
+)
+```
+
+## Row {height=520px}
+
+### Daily Page Views by Site
+
+```{r}
+top_pages_plot <- top_pages |>
+  filter(month == current_month) |>
+  mutate(full_label = page_url, label = page_url)
+
+site_dropdown_barh(
+  top_pages_plot,
+  label_col = "label", value_col = "page_views",
+  value_name = "Page views",
+  title_prefix = paste0("Top Pages by Page Views (", current_month_str, ")")
+)
+```
+
+## Row {height=480px}
+
+### Top Referrers {width=50%}
+
+```{r}
+top_ref_plot <- top_referrers |>
+  filter(month == current_month) |>
+  filter(!is.na(referrer_url), referrer_url != "", referrer_url != "(unknown)") |>
+  mutate(full_label = referrer_url, label = referrer_url)
+
+site_dropdown_barh(
+  top_ref_plot,
+  label_col = "label", value_col = "page_views",
+  value_name = "Page views",
+  title_prefix = paste0("Top Referrers (", current_month_str, ")"),
+  top_n = 12,
+  pre_aggregate = TRUE,
+  include_all_sites = TRUE,
+  default_site = "all_sites"
+)
+```
+
+### Operating System Share {width=50%}
+
+```{r}
+os_plot <- by_os |>
+  filter(month == current_month) |>
+  mutate(label = os, full_label = os)
+
+site_dropdown_barh(
+  os_plot,
+  label_col = "label", value_col = "page_views",
+  value_name = "Page views",
+  title_prefix = paste0("Page Views by Operating System (", current_month_str, ")"),
+  top_n = 10,
+  pre_aggregate = TRUE,
+  include_all_sites = TRUE,
+  default_site = "all_sites"
+)
+```
+
+## Row {height=440px}
+
+### Top Locations by Page Views
+
+```{r}
+geo_plot <- by_geo |>
+  filter(month == current_month)
+if (!"region" %in% names(geo_plot)) geo_plot$region <- NA_character_
+if (!"country" %in% names(geo_plot)) geo_plot$country <- NA_character_
+geo_plot <- geo_plot |>
+  mutate(
+    region = ifelse(is.na(region) | region == "", NA_character_, region),
+    country = ifelse(is.na(country) | country == "", "(unknown)", country)
+  ) |>
+  # Keep all traffic: when the province/state is unknown, fall back to the
+  # country as the location rather than dropping the row. This avoids
+  # understating countries whose visits are mostly region-less (e.g. China).
+  mutate(
+    label = ifelse(is.na(region), country, paste0(region, ", ", country)),
+    full_label = label
+  ) |>
+  filter(label != "(unknown)")
+
+site_dropdown_barh(
+  geo_plot,
+  label_col = "label", value_col = "page_views",
+  value_name = "Page views",
+  title_prefix = paste0("Top Locations by Page Views (", current_month_str, ")"),
+  top_n = 12, pre_aggregate = TRUE,
+  include_all_sites = TRUE,
+  default_site = "all_sites"
+)
+```
+
+# BC Stats Product Use {scrolling="true"}
+
+```{r govstats-flags, include=FALSE}
+has_assets <- !is.null(asset_daily) && nrow(asset_daily) > 0
+has_search <- !is.null(search_terms) && nrow(search_terms) > 0
+has_google <- !is.null(google_queries) && nrow(google_queries) > 0
+
+# Asset downloads are dated, so report current-month totals with a MoM scaffold.
+total_downloads <- if (has_assets) month_total(asset_daily_by_month, "downloads", current_month) else NA_real_
+previous_downloads <- if (has_assets) month_total(asset_daily_by_month, "downloads", previous_month) else NA_real_
+downloads_delta <- if (has_assets) {
+  delta_caption(total_downloads, previous_downloads, previous_month_str)
+} else ""
+
+# Search terms and Google queries are now month-partitioned too.
+total_searches  <- if (has_search) month_total(search_terms_by_month, "searches", current_month) else NA_real_
+previous_searches <- if (has_search) month_total(search_terms_by_month, "searches", previous_month) else NA_real_
+searches_delta  <- if (has_search) delta_caption(total_searches, previous_searches, previous_month_str) else ""
+total_g_clicks  <- if (has_google) month_total(google_queries_by_month, "clicks", current_month) else NA_real_
+previous_g_clicks <- if (has_google) month_total(google_queries_by_month, "clicks", previous_month) else NA_real_
+g_clicks_delta  <- if (has_google) delta_caption(total_g_clicks, previous_g_clicks, previous_month_str) else ""
+total_g_impress <- if (has_google) month_total(google_queries_by_month, "impressions", current_month) else NA_real_
+previous_g_impress <- if (has_google) month_total(google_queries_by_month, "impressions", previous_month) else NA_real_
+g_impress_delta <- if (has_google) delta_caption(total_g_impress, previous_g_impress, previous_month_str) else ""
+```
+
+Asset and product download activity, on-site search, and Google Search
+performance for the **BC Stats** property (the CMS Lite site,
+www2.gov.bc.ca/gov/content/data/statistics).
+
+## Row {height=210px}
+
+::: {.valuebox color="primary" title="Asset Downloads in `r current_month_str``r downloads_delta`"}
+`r comma(total_downloads)`
+:::
+
+::: {.valuebox color="info" title="Site Searches in `r current_month_str``r searches_delta`"}
+`r comma(total_searches)`
+:::
+
+::: {.valuebox color="success" title="Google Clicks in `r current_month_str``r g_clicks_delta`"}
+`r comma(total_g_clicks)`
+:::
+
+::: {.valuebox color="secondary" title="Google Impressions in `r current_month_str``r g_impress_delta`"}
+`r comma(total_g_impress)`
+:::
+
+## Row {height=500px}
+
+### Daily Asset Downloads {width=45%}
+
+```{r}
+if (has_assets) {
+  d <- asset_daily |>
+    filter(month == current_month) |>
+    arrange(date)
+
+  plot_ly(
+    d,
+    x = ~date, y = ~downloads, type = "scatter", mode = "lines",
+    line = list(color = "#003366", width = 2),
+    hovertemplate = "<b>%{x|%b %d, %Y}</b><br>Downloads: %{y:,}<extra></extra>"
+  ) |>
+    layout(
+      title = list(text = paste0("<b>Daily Asset Downloads (", current_month_str, ")</b>"),
+                   font = modifyList(bc_font, list(size = 15, color = "#003366"))),
+      xaxis = list(title = "", gridcolor = "#e8ecf0", tickformat = "%b %d",
+                   tickfont = modifyList(bc_font, list(size = 10, color = "#2d2d2d"))),
+      yaxis = list(title = "", gridcolor = "#e8ecf0", automargin = TRUE,
+                   tickfont = modifyList(bc_font, list(size = 10, color = "#5c6b7a"))),
+      plot_bgcolor = "#ffffff", paper_bgcolor = "#ffffff",
+      margin = list(l = 10, r = 20, t = 50, b = 30)
+    ) |>
+    config(
+      displaylogo = plotly_config$displaylogo,
+      modeBarButtonsToRemove = plotly_config$modeBarButtonsToRemove,
+      responsive = plotly_config$responsive
+    )
+} else {
+  plot_ly() |>
+    add_annotations(text = "No asset download data available.", x = 0.5, y = 0.5,
+                    xref = "paper", yref = "paper", showarrow = FALSE,
+                    font = modifyList(bc_font, list(size = 13, color = "#5c6b7a"))) |>
+    layout(xaxis = list(visible = FALSE), yaxis = list(visible = FALSE))
+}
+```
+
+### Top Downloaded Assets {width=55%}
+
+```{r}
+if (has_assets && !is.null(top_assets)) {
+  d <- top_assets |>
+    filter(month == current_month) |>
+    mutate(
+      fname = ifelse(is.na(asset_file) | asset_file == "", basename(asset_url), asset_file),
+      full_label = coalesce(asset_url, fname),
+      label = shorten_url(coalesce(asset_url, fname))
+    ) |>
+    arrange(desc(downloads)) |>
+    slice_head(n = 15)
+
+  site_dropdown_barh(
+    d,
+    label_col = "label", value_col = "downloads",
+    value_name = "Downloads",
+    title_prefix = paste0("Top Downloaded Assets (", current_month_str, ")"),
+    top_n = 15, show_dropdown = FALSE
+  )
+} else {
+  plot_ly() |>
+    add_annotations(text = "No asset data available.", x = 0.5, y = 0.5,
+                    xref = "paper", yref = "paper", showarrow = FALSE,
+                    font = modifyList(bc_font, list(size = 13, color = "#5c6b7a"))) |>
+    layout(xaxis = list(visible = FALSE), yaxis = list(visible = FALSE))
+}
+```
+
+## Row {height=520px}
+
+### Top Site Search Terms {width=45%}
+
+```{r}
+if (has_search) {
+  d <- search_terms |>
+    filter(month == current_month) |>
+    arrange(desc(searches)) |>
+    slice_head(n = 15)
+
+  site_dropdown_barh(
+    d,
+    label_col = "search_term", value_col = "searches",
+    value_name = "Searches",
+    title_prefix = paste0("Top On-Site Search Terms (", current_month_str, ")"),
+    top_n = 15, show_dropdown = FALSE
+  )
+} else {
+  plot_ly() |>
+    add_annotations(text = "No search data available.", x = 0.5, y = 0.5,
+                    xref = "paper", yref = "paper", showarrow = FALSE,
+                    font = modifyList(bc_font, list(size = 13, color = "#5c6b7a"))) |>
+    layout(xaxis = list(visible = FALSE), yaxis = list(visible = FALSE))
+}
+```
+
+### Top 10 Google Search Queries {width=55%}
+
+```{r}
+# Column	Meaning
+# Query:	The search term a user typed into Google
+# Page:	The specific URL on your site that appeared in Google's results for that query
+# Clicks:	How many times users clicked that URL from Google results
+# Impressions:	How many times that URL appeared in Google results for that query
+# CTR:	Click-through rate = Clicks ÷ Impressions
+if (has_google) {
+  google_tbl <- google_queries |>
+    filter(month == current_month) |>
+    arrange(desc(clicks)) |>
+    slice_head(n = 10) |>
+    transmute(
+      Query = query,
+      Page = page,
+      Clicks = clicks,
+      Impressions = impressions,
+      CTR = percent(ctr, accuracy = 0.1)
+    )
+
+  datatable(
+    google_tbl,
+    options = list(pageLength = 10, dom = "t", scrollX = TRUE, order = list(list(2, "desc"))),
+    rownames = FALSE
+  )
+} else {
+  cat("No Google Search data available.")
+}
+```
+
+# About
+
+### About This Dashboard
+
+**Maintainer / Contact**: Data Science Team
+
+**Data Source**: Web traffic report exports for three BC Stats web properties:
+BC Stats, Anti-Racism Data Act, and Student Outcomes. These reports are retrieved
+from the shared GDX S3 folder by `R/gdx-01-fetch-s3.R` and summarized by
+`R/gdx-02-analyze.R`.
+
+**Coverage**: Reporting period `r date_range_str`. The dashboard tracks usage
+patterns for three BC Stats web properties. Value boxes report the latest
+month's totals.
+
+- **BC Stats** — CMS Lite content on gov.bc.ca, including
+  `www2.gov.bc.ca/gov/content/data/statistics` and related sub-themes
+- **Anti-Racism Data Act** — WordPress site at `antiracism.gov.bc.ca`
+- **Student Outcomes** — WordPress site at `outcomes.bcstats.gov.bc.ca`
+
+**Reports per property**: Each property includes daily page views by URL, daily
+clicks by target URL, daily referring URLs, daily platform/operating system
+counts, and daily counts by province and country.
+
+The **BC Stats** property also includes additional product-use reporting:
+asset/product download counts, on-site search terms, and Google Search query
+performance. These outputs are summarized in the **BC Stats Product Use** tab.
+
+**Month-over-month change**: Value boxes show the latest month's totals.
+Percentage change compared with the previous month appears automatically once
+more than one month of data is available. 
+
+**How we build this**: Created with [Quarto Dashboards](https://quarto.org/docs/dashboards/)
+in R, using `dplyr`, `ggplot2`, and `plotly`. The data extraction and rendering
+code is open source.
+
+**Source Code**: Find the source code on our [GitHub Repository](https://github.com/bcgov/bcstats-webtraffic-monitoring).

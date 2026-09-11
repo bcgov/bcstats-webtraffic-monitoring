@@ -30,5 +30,7 @@ data/
 *.csv
 /.quarto/
 **/*.quarto_ipynb
-/.posit/assistant
+/.posit
 *.html
+/.git
+conversation-export.json

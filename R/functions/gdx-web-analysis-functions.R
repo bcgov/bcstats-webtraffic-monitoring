@@ -14,35 +14,76 @@
 
 # CMS Lite analysis helper functions
 
-# Map the verbose CMS Lite column names to short, clear names. Applied at load
-# time via any_of(), so each report keeps only the names relevant to it.
-cmslite_short_names <- c(
-  date = "page_views_page_view_start_date",
-  date = "clicks_click_time_date",
-  date = "asset_downloads_download_time_date",
-  page_views = "page_views_page_view_count",
-  sessions = "page_views_session_count",
-  users = "page_views_user_count",
-  page_url = "page_views_page_display_url",
-  referrer_url = "page_views_page_referrer_display_url",
-  os = "page_views_os_family",
-  country_code = "page_views_geo_country",
-  country = "page_views_geo_country_name",
-  region_code = "page_views_geo_region",
-  region = "page_views_geo_region_or_country",
-  clicks = "clicks_click_count",
-  target_url = "clicks_target_display_url",
-  asset_file = "asset_downloads_asset_file",
-  asset_url = "asset_downloads_asset_display_url",
-  asset_theme_id = "asset_themes_node_id",
-  downloads = "asset_downloads_count",
-  search_term = "searches_search_terms",
-  searches = "searches_row_count",
-  query = "google_search_query",
-  page = "google_search_page",
-  clicks = "google_search_total_clicks",
-  impressions = "google_search_total_impressions"
+# Map canonical names to all known CMS Lite source column variants.
+cmslite_name_map <- list(
+  date = c(
+    "page_views_page_view_start_date",
+    "clicks_click_time_date",
+    "asset_downloads_download_time_date",
+    "searches_search_date",
+    "searches_search_time_date",
+    "google_search_date",
+    "google_search_month"
+  ),
+  page_views = c("page_views_page_view_count"),
+  sessions = c("page_views_session_count"),
+  users = c("page_views_user_count"),
+  page_url = c("page_views_page_display_url"),
+  referrer_url = c("page_views_page_referrer_display_url"),
+  os = c("page_views_os_family"),
+  country_code = c("page_views_geo_country"),
+  country = c("page_views_geo_country_name"),
+  region_code = c("page_views_geo_region"),
+  region = c(
+    "page_views_geo_region_name",
+    "page_views_geo_region_or_country",
+    "page_views_geo_region"
+  ),
+  click_count = c(
+    "clicks_click_count",
+    "google_search_total_clicks",
+    "google_search_click_count"
+  ),
+  target_url = c("clicks_target_display_url"),
+  asset_file = c("asset_downloads_asset_file"),
+  asset_url = c("asset_downloads_asset_display_url"),
+  asset_theme_id = c("asset_themes_node_id"),
+  downloads = c("asset_downloads_count"),
+  search_term = c("searches_search_terms"),
+  searches = c(
+    "searches_row_count",
+    "searches_search_count",
+    "searches_count"
+  ),
+  query = c("google_search_query"),
+  page = c("google_search_page"),
+  impressions = c(
+    "google_search_total_impressions",
+    "google_search_impressions"
+  )
 )
+
+coalesce_aliases <- function(df, aliases, output) {
+  present <- aliases[aliases %in% names(df)]
+  if (length(present) == 0) {
+    return(df)
+  }
+
+  if (length(present) == 1) {
+    return(dplyr::rename(df, !!output := dplyr::all_of(present)))
+  }
+
+  dplyr::mutate(df, !!output := dplyr::coalesce(!!!rlang::syms(present))) |>
+    dplyr::select(-dplyr::any_of(setdiff(present, output)))
+}
+
+normalize_cmslite_names <- function(df) {
+  purrr::reduce(
+    .x = names(cmslite_name_map),
+    .f = \(acc, nm) coalesce_aliases(acc, cmslite_name_map[[nm]], nm),
+    .init = df
+  )
+}
 
 load_report <- function(raw_dir, site, report) {
   all_csv <- list.files(
@@ -67,7 +108,7 @@ load_report <- function(raw_dir, site, report) {
     \(f) {
       readr::read_csv(f, show_col_types = FALSE) |>
         janitor::clean_names(case = "snake") |>
-        dplyr::rename(dplyr::any_of(cmslite_short_names)) |>
+        normalize_cmslite_names() |>
         dplyr::mutate(source_file = basename(f))
     }
   ) |>
@@ -99,13 +140,13 @@ analyze_click <- function(df) {
   list(
     daily = df |>
       dplyr::summarise(
-        clicks = sum(clicks, na.rm = TRUE),
+        clicks = sum(click_count, na.rm = TRUE),
         .by = date
       ) |>
       dplyr::arrange(date),
     top_targets = df |>
       dplyr::summarise(
-        clicks = sum(clicks, na.rm = TRUE),
+        clicks = sum(click_count, na.rm = TRUE),
         .by = target_url
       ) |>
       dplyr::arrange(dplyr::desc(clicks))
@@ -137,13 +178,22 @@ analyze_platform <- function(df) {
 }
 
 analyze_geoloc <- function(df) {
+  group_vars <- intersect(c("country", "region"), names(df))
+
+  if (length(group_vars) == 0) {
+    stop(
+      "Geolocation report is missing both 'country' and 'region' columns.",
+      call. = FALSE
+    )
+  }
+
   list(
     by_geo = df |>
       dplyr::summarise(
         page_views = sum(page_views, na.rm = TRUE),
         sessions = sum(sessions, na.rm = TRUE),
         users = sum(users, na.rm = TRUE),
-        .by = c(country, region)
+        .by = dplyr::all_of(group_vars)
       ) |>
       dplyr::arrange(dplyr::desc(page_views))
   )
@@ -181,7 +231,7 @@ analyze_google <- function(df) {
   list(
     top_queries = df |>
       dplyr::summarise(
-        clicks = sum(clicks, na.rm = TRUE),
+        clicks = sum(click_count, na.rm = TRUE),
         impressions = sum(impressions, na.rm = TRUE),
         .by = c(query, page)
       ) |>
@@ -191,6 +241,38 @@ analyze_google <- function(df) {
       dplyr::arrange(dplyr::desc(clicks))
   )
 }
+analyze_bcdc_click <- function(df, top_n = 20) {
+  df |>
+    dplyr::filter(
+      stringr::str_detect(
+        target_url,
+        stringr::regex("catalogue\\.data\\.gov\\.bc\\.ca", ignore_case = TRUE)
+      )
+    ) |>
+    dplyr::summarise(
+      clicks = sum(click_count, na.rm = TRUE),
+      .by = target_url
+    ) |>
+    dplyr::arrange(dplyr::desc(clicks)) |>
+    dplyr::slice(1:top_n) |>
+    dplyr::mutate(rank = dplyr::row_number(), .before = target_url)
+}
+
+analyze_bcdc_asset <- function(df) {
+  df |>
+    dplyr::filter(
+      stringr::str_detect(
+        asset_url,
+        stringr::regex("catalogue\\.data\\.gov\\.bc\\.ca", ignore_case = TRUE)
+      )
+    ) |>
+    dplyr::summarise(
+      downloads = sum(downloads, na.rm = TRUE),
+      .by = c(asset_file, asset_url)
+    ) |>
+    dplyr::arrange(dplyr::desc(downloads))
+}
+
 # Metric Definitions
 # Impressions: The total number of times your ad or link was displayed on a screen.
 # Clicks: The total number of times users actually clicked on the displayed link or ad.

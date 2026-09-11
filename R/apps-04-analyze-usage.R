@@ -18,7 +18,7 @@ if (!exists("required_packages")) {
   source("R/00-setup.R")
 }
 
-# # Load the data we fetched in 01a-get-ga-data.R
+# # Load the data we fetched in apps-01-fetch-ga-history.R
 # load(file.path(DATA_RAW, "ga_raw_data.RData"))
 
 # load rds files if you want to work with individual tables:

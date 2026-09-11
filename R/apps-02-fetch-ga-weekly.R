@@ -23,8 +23,10 @@ if (!exists("required_packages")) {
 end_date <- as.character(Sys.Date() - 1)
 
 # set weekly end date to the last completed Sunday (ISO week default: Mon-Sun)
+# `%u` returns 1..7 (Mon..Sun). Use %% 7 so Sunday maps to 0 days back,
+# otherwise Monday runs skip the most recent completed week.
 day_of_week_iso <- as.integer(format(as.Date(end_date), "%u")) # 1=Mon ... 7=Sun
-end_date_weekly <- as.character(as.Date(end_date) - day_of_week_iso)
+end_date_weekly <- as.character(as.Date(end_date) - (day_of_week_iso %% 7L))
 
 # Helper function to append and deduplicate rows
 append_distinct <- function(existing, new_data, key_cols) {
@@ -33,7 +35,7 @@ append_distinct <- function(existing, new_data, key_cols) {
     arrange(across(any_of(c("date", "isoYearIsoWeek"))))
 }
 
-# read current base data from 01a-get-ga-data.R
+# read current base data from apps-01-fetch-ga-history.R
 daily_usage_raw <- readRDS(file.path(DATA_RAW, "daily_usage_raw.rds"))
 geo_data_raw <- readRDS(file.path(DATA_RAW, "geo_data_raw.rds"))
 tech_data_raw <- readRDS(file.path(DATA_RAW, "tech_data_raw.rds"))

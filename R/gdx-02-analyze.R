@@ -14,19 +14,36 @@
 
 # Purpose: Analyze CMS Lite reports by site (in-memory only).
 
-if (!exists("required_packages")) {
-  source("R/00-setup.R")
-}
+source("R/00-setup.R")
+source("R/functions/month-run-helpers.R")
 
 library(dplyr)
 library(readr)
 library(stringr)
 library(purrr)
 
-raw_dir <- file.path(DATA_RAW, "cms_lite")
+# Resolve target month (default: previous month).
+# Override with env var GDX_TARGET_MONTH=YYYY-MM when needed.
+analysis_month <- resolve_target_month(mode = "previous")
+
+raw_dir <- file.path(DATA_RAW, "cms_lite", analysis_month)
+
+if (!dir.exists(raw_dir)) {
+  stop(
+    sprintf("Analysis input directory does not exist: %s", raw_dir),
+    call. = FALSE
+  )
+}
+
+# Ensure expected monthly source report families exist before analysis.
+assert_cmslite_reports_present(raw_dir)
+
+# Create CMS Lite output subfolder for this analysis month.
+cmslite_output_dir <- file.path(OUTPUT_TABLES, "cms_lite", analysis_month)
+dir.create(cmslite_output_dir, recursive = TRUE, showWarnings = FALSE)
 
 # Shared helper functions
-source("R/functions/cmslite-analysis-functions.R")
+source("R/functions/gdx-web-analysis-functions.R")
 
 ##### ============================================================
 ##### PART 1: outcomes.bcstats.gov.bc.ca (5 reports)
@@ -78,6 +95,39 @@ govstats_geoloc <- load_report(raw_dir, "govstats", "geoloc")
 govstats_asset <- load_report(raw_dir, "govstats", "asset")
 govstats_search <- load_report(raw_dir, "govstats", "search")
 govstats_google <- load_report(raw_dir, "govstats", "google")
+
+##### ============================================================
+##### VALIDATE REPORTING PERIOD
+##### Filenames carry a generation timestamp, not the reporting month
+##### (see docs/BC_STATS_S3_FILE_GUIDE.md), so the month is confirmed from
+##### file contents before any analysis runs.
+##### ============================================================
+
+assert_reports_month(
+  list(
+    "outcomes pageview" = outcomes_pageview,
+    "outcomes click" = outcomes_click,
+    "outcomes referurl" = outcomes_referurl,
+    "outcomes platform" = outcomes_platform,
+    "outcomes geoloc" = outcomes_geoloc,
+    "antiracism pageview" = antiracism_pageview,
+    "antiracism click" = antiracism_click,
+    "antiracism referurl" = antiracism_referurl,
+    "antiracism platform" = antiracism_platform,
+    "antiracism geoloc" = antiracism_geoloc,
+    "govstats pageview" = govstats_pageview,
+    "govstats click" = govstats_click,
+    "govstats referurl" = govstats_referurl,
+    "govstats platform" = govstats_platform,
+    "govstats geoloc" = govstats_geoloc,
+    "govstats asset" = govstats_asset,
+    "govstats search" = govstats_search,
+    "govstats google" = govstats_google
+  ),
+  analysis_month
+)
+
+message(sprintf("Month %s: all 18 source reports validated.", analysis_month))
 
 govstats_analysis <- list(
   pageview = analyze_pageview(govstats_pageview),
@@ -156,14 +206,24 @@ cmslite_tables <- list(
 
 ##### ============================================================
 ##### WRITE DASHBOARD CSVs
-##### Prefixed `cmslite_` to avoid colliding with GA tables in OUTPUT_TABLES.
+##### Saved to OUTPUT_TABLES/cms_lite/<analysis_month>/ with month-tagged filenames.
 ##### Comment out the loop below to avoid overwriting CSVs during development.
 ##### ============================================================
 
 imap(cmslite_tables, \(x, name) {
   if (!is.null(x) && nrow(x) > 0) {
-    write_csv(x, file = file.path(OUTPUT_TABLES, paste0(name, ".csv")))
+    filename <- sprintf("%s_%s.csv", name, analysis_month)
+    write_csv(x, file = file.path(cmslite_output_dir, filename))
   }
 })
+
+# Validate output table completeness before dashboard render.
+assert_monthly_outputs(cmslite_output_dir)
+
+message(sprintf(
+  "Month %s: wrote CMS Lite output tables to: %s",
+  analysis_month,
+  cmslite_output_dir
+))
 
 cmslite_analysis

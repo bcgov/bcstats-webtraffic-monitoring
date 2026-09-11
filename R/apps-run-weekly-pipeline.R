@@ -21,10 +21,10 @@ source("R/00-setup.R")
 # STEP 1 & 2: FETCH NEW DATA AND GENERATE SUMMARIES
 # ==============================================================================
 message("Step 1: Fetching latest GA4 data...")
-source("R/01c-get-ga-data-weekly.R")
+source("R/apps-02-fetch-ga-weekly.R")
 
 message("Step 2: Analyzing usage and updating summary tables...")
-source("R/02a-analyze-usage.R")
+source("R/apps-04-analyze-usage.R")
 
 
 # ==============================================================================
