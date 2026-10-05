@@ -1,36 +1,69 @@
-README.html
+# R / Posit
+.Rproj.user/
 .Rproj.user
 .Rhistory
-*.csv
-*.rds
-*.lintr
-tasks.json
-.RData
-.Ruserdata
-.DS_Store
-/docs
-/tmp
-/data
-/outputs
-*.csv
-*.html
-config.yml
-ga-auth-key.json
-.Renviron
-.Rhistory
 .Rapp.history
+.RData
 .RDataTmp
-.Rproj.user/
-*_cache/
-/cache/
-rsconnect/
-/Report/dashboard_files/
-*.txt
-data/
-*.csv
+.Ruserdata
+.Renviron
+.Renviron.*
+.Rprofile
+*.rds
+*.Rds
+*.RDS
+
+# Local environment and secrets
+.env
+.env.*
+*.pem
+*.key
+*.crt
+*.p12
+*.log
+*.tmp
+*.bak
+*.swp
+*.swo
+**/*auth*.json
+**/*service-account*.json
+**/*credential*.json
+**/*secret*.json
+ga-auth-key.json
+conversation-export.json
+
+# Quarto / notebooks / caches
 /.quarto/
 **/*.quarto_ipynb
-/.posit
-*.html
-/.git
-conversation-export.json
+**/_site/
+**/_freeze/
+**/_cache/
+**/cache/
+**/.cache/
+**/*.html
+**/*_files/
+
+# IDE folders
+.vscode/
+.posit/
+
+# Local generated data and outputs
+/data/
+/outputs/
+/data_KM/
+README.html
+README_files/
+Report/*.html
+Report/**/dashboard_files/
+
+# Documentation build artifacts
+/docs/**/*.html
+/docs/**/*_files/
+
+# Temporary or local-only project files
+*.tmp
+*.bak
+*.txt
+
+# Keep tracked docs and source code in the repository
+# Do not ignore docs/, Report/, R/, or README.md intentionally.
