@@ -1,0 +1,102 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="670" viewBox="0 0 1280 670" role="img" aria-labelledby="title desc">
+  <title id="title">BC Stats web traffic monitoring workflows</title>
+  <desc id="desc">Two independent reporting streams. For Shiny apps, GA4 data is refreshed weekly, analyzed into LAN tables, and rendered as a dashboard. shinyapps.io concurrency metrics are fetched and analyzed separately. For public web traffic, monthly GDX CSV exports are selected from S3 for BC Stats CMS Lite and two WordPress properties, downloaded, validated, analyzed into LAN tables, and rendered as a monthly dashboard. Raw data, summary outputs, and generated HTML are not committed to Git.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L10,4 L0,8 z" fill="#385f93"/>
+    </marker>
+    <style>
+      .source { fill: #f4f7fb; stroke: #385f93; stroke-width: 2.2; }
+      .process { fill: #eef5fb; stroke: #547a9f; stroke-width: 2.2; }
+      .store { fill: #e7f2f7; stroke: #087681; stroke-width: 2.2; }
+      .report { fill: #edf5ed; stroke: #3b7651; stroke-width: 2.2; }
+      .head { font: 700 23px Arial, sans-serif; fill: #17365d; }
+      .section { font: 700 20px Arial, sans-serif; fill: #17365d; }
+      .label { font: 16px Arial, sans-serif; fill: #172b4d; text-anchor: middle; }
+      .small { font: 13px Arial, sans-serif; fill: #3e5874; text-anchor: middle; }
+      .arrow { stroke: #385f93; stroke-width: 2.4; fill: none; marker-end: url(#arrow); }
+      .divider { stroke: #ccd6e0; stroke-width: 1.5; stroke-dasharray: 7 7; }
+    </style>
+  </defs>
+
+  <text class="head" x="35" y="40">BC Stats Web Traffic Monitoring — Project Workflows</text>
+  <line class="divider" x1="30" y1="350" x2="1250" y2="350"/>
+
+  <text class="section" x="35" y="78">Shiny apps stream — weekly usage; concurrency collected separately</text>
+
+  <rect class="source" x="35" y="112" width="175" height="72" rx="10"/>
+  <text class="label" x="122" y="143">Google Analytics 4</text>
+  <text class="small" x="122" y="164">app usage data</text>
+
+  <path class="arrow" d="M210 148 H258"/>
+  <rect class="process" x="268" y="119" width="195" height="90" rx="10"/>
+  <text class="label" x="365" y="151">Weekly fetch + analysis</text>
+  <text class="small" x="365" y="176">R/apps-02 + apps-04</text>
+  <text class="small" x="365" y="196">usage summaries</text>
+
+  <path class="arrow" d="M463 164 H505"/>
+  <path class="store" d="M515 132 C515 116 690 116 690 132 L690 202 C690 218 515 218 515 202 Z"/>
+  <ellipse class="store" cx="602" cy="132" rx="87" ry="16"/>
+  <path d="M515 202 C515 218 690 218 690 202" fill="none" stroke="#087681" stroke-width="2.2"/>
+  <text class="label" x="602" y="164">LAN raw data</text>
+  <text class="small" x="602" y="188">and summary tables</text>
+
+  <path class="arrow" d="M690 164 H735"/>
+  <rect class="process" x="745" y="119" width="210" height="90" rx="10"/>
+  <text class="label" x="850" y="151">Quarto dashboard</text>
+  <text class="small" x="850" y="176">Report/shinyapps_dashboard.qmd</text>
+  <text class="small" x="850" y="196">weekly render + archive</text>
+
+  <path class="arrow" d="M955 164 H1000"/>
+  <rect class="report" x="1010" y="132" width="220" height="70" rx="10"/>
+  <text class="label" x="1120" y="162">Shiny apps dashboard</text>
+  <text class="small" x="1120" y="185">HTML ignored by Git</text>
+
+  <rect class="source" x="35" y="235" width="175" height="72" rx="10"/>
+  <text class="label" x="122" y="266">shinyapps.io</text>
+  <text class="small" x="122" y="287">concurrency metrics</text>
+  <path class="arrow" d="M210 271 H258"/>
+  <rect class="process" x="268" y="242" width="195" height="72" rx="10"/>
+  <text class="label" x="365" y="272">Separate fetch + analysis</text>
+  <text class="small" x="365" y="295">R/apps-03 + apps-05</text>
+  <path class="arrow" d="M463 278 H505"/>
+  <path class="store" d="M515 255 C515 239 690 239 690 255 L690 301 C690 317 515 317 515 301 Z"/>
+  <ellipse class="store" cx="602" cy="255" rx="87" ry="16"/>
+  <path d="M515 301 C515 317 690 317 690 301" fill="none" stroke="#087681" stroke-width="2.2"/>
+  <text class="label" x="602" y="280">LAN concurrency data</text>
+  <text class="small" x="602" y="301">separate summary output</text>
+
+  <text class="section" x="35" y="390">Public web properties — monthly GDX data exports</text>
+
+  <rect class="source" x="35" y="427" width="190" height="112" rx="10"/>
+  <text class="label" x="130" y="459">GDX source files</text>
+  <text class="small" x="130" y="482">monthly CSV exports in S3</text>
+  <text class="small" x="130" y="505">BC Stats: CMS Lite</text>
+  <text class="small" x="130" y="526">Student Outcomes + Anti-Racism</text>
+
+  <path class="arrow" d="M225 483 H262"/>
+  <rect class="process" x="272" y="434" width="190" height="100" rx="10"/>
+  <text class="label" x="367" y="466">Select, download,</text>
+  <text class="label" x="367" y="488">and validate</text>
+  <text class="small" x="367" y="513">R/gdx-01-fetch-s3.R</text>
+
+  <path class="arrow" d="M462 483 H502"/>
+  <path class="store" d="M512 445 C512 429 687 429 687 445 L687 525 C687 541 512 541 512 525 Z"/>
+  <ellipse class="store" cx="599" cy="445" rx="87" ry="16"/>
+  <path d="M512 525 C512 541 687 541 687 525" fill="none" stroke="#087681" stroke-width="2.2"/>
+  <text class="label" x="599" y="479">LAN working data</text>
+  <text class="small" x="599" y="504">raw files + monthly tables</text>
+
+  <path class="arrow" d="M687 483 H727"/>
+  <rect class="process" x="737" y="434" width="205" height="100" rx="10"/>
+  <text class="label" x="839" y="466">Analyze and render</text>
+  <text class="small" x="839" y="491">R/gdx-02-analyze.R</text>
+  <text class="small" x="839" y="513">Report/gdx_web_dashboard.qmd</text>
+
+  <path class="arrow" d="M942 483 H982"/>
+  <rect class="report" x="992" y="445" width="238" height="80" rx="10"/>
+  <text class="label" x="1111" y="477">Monthly web dashboard</text>
+  <text class="small" x="1111" y="501">HTML ignored by Git</text>
+
+  <text class="small" x="640" y="595">Scripts and Quarto sources are versioned; raw data, summary outputs, and rendered HTML stay on LAN/local storage.</text>
+</svg>
