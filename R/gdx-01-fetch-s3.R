@@ -71,6 +71,14 @@ dir.create(
   showWarnings = FALSE
 )
 
+# Clear out prior CSVs for this month before downloading.
+# This prevents stale files from an earlier run from lingering alongside the
+# current delivery and confusing downstream analysis.
+old_csvs <- list.files(target_dir, pattern = "\\.csv$", full.names = TRUE)
+if (length(old_csvs) > 0) {
+  unlink(old_csvs)
+}
+
 # Step 5: List objects from the target S3 prefix.
 objects <- get_bucket(
   bucket = bucket,

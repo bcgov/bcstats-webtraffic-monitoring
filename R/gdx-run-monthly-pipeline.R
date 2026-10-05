@@ -47,10 +47,28 @@ clean_env <- function(name) {
   if (nzchar(val)) str_remove(str_remove(val, "^/"), "/$") else ""
 }
 
-source_subfolder_env <- clean_env("BCSTATS_S3_SOURCE_SUBFOLDER")
-key_pattern_env <- Sys.getenv("BCSTATS_S3_KEY_PATTERN", unset = "")
+use_explicit_s3_selection <- tolower(Sys.getenv(
+  "GDX_USE_EXPLICIT_S3_SELECTION",
+  unset = "false"
+)) %in%
+  c("true", "1", "yes")
 
-if (nzchar(source_subfolder_env) || nzchar(key_pattern_env)) {
+source_subfolder_env <- if (use_explicit_s3_selection) {
+  clean_env("BCSTATS_S3_SOURCE_SUBFOLDER")
+} else {
+  ""
+}
+
+key_pattern_env <- if (use_explicit_s3_selection) {
+  Sys.getenv("BCSTATS_S3_KEY_PATTERN", unset = "")
+} else {
+  ""
+}
+
+if (
+  use_explicit_s3_selection &&
+    (nzchar(source_subfolder_env) || nzchar(key_pattern_env))
+) {
   selection <- list(
     subfolder = source_subfolder_env,
     key_pattern = key_pattern_env,

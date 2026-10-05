@@ -106,9 +106,27 @@ load_report <- function(raw_dir, site, report) {
   purrr::map(
     matched,
     \(f) {
-      readr::read_csv(f, show_col_types = FALSE) |>
+      readr::read_csv(
+        f,
+        show_col_types = FALSE,
+        col_types = readr::cols(.default = readr::col_guess())
+      ) |>
         janitor::clean_names(case = "snake") |>
         normalize_cmslite_names() |>
+        dplyr::mutate(
+          dplyr::across(
+            dplyr::any_of(c(
+              "click_count",
+              "impressions",
+              "downloads",
+              "searches",
+              "page_views",
+              "sessions",
+              "users"
+            )),
+            ~ suppressWarnings(readr::parse_number(as.character(.x)))
+          )
+        ) |>
         dplyr::mutate(source_file = basename(f))
     }
   ) |>
@@ -230,6 +248,12 @@ analyze_search <- function(df) {
 analyze_google <- function(df) {
   list(
     top_queries = df |>
+      dplyr::mutate(
+        dplyr::across(
+          c(click_count, impressions),
+          ~ readr::parse_number(as.character(.x))
+        )
+      ) |>
       dplyr::summarise(
         clicks = sum(click_count, na.rm = TRUE),
         impressions = sum(impressions, na.rm = TRUE),
