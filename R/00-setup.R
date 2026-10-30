@@ -14,7 +14,7 @@
 
 # # Purpose: Load libraries and authenticate with Google Analytics and shinyapps.io
 
-#  Packages
+# Packages installed from configured repositories
 required_packages <- c(
   "googleAnalyticsR",
   "tidyverse",
@@ -23,7 +23,7 @@ required_packages <- c(
   "janitor",
   "slider",
   "rsconnect",
-  "safepaths",
+  "aws.s3",
   "glue",
   "ggplot2",
   "forcats",
@@ -31,11 +31,11 @@ required_packages <- c(
   "flexdashboard"
 )
 
-# Check for missing packages, and install if necessary
+# Check for missing repository packages, and install if necessary
 missing_packages <- setdiff(required_packages, rownames(installed.packages()))
 if (length(missing_packages) > 0) {
   install.packages(missing_packages, dependencies = TRUE)
-  missing_after <- setdiff(required_packages, rownames(installed.packages()))
+  missing_after <- setdiff(missing_packages, rownames(installed.packages()))
   if (length(missing_after) > 0) {
     stop(
       sprintf(
@@ -48,8 +48,26 @@ if (length(missing_packages) > 0) {
   }
 }
 
+# Install safepaths from GitHub if it is missing.
+if (!requireNamespace("safepaths", quietly = TRUE)) {
+  if (!requireNamespace("remotes", quietly = TRUE)) {
+    install.packages("remotes")
+  }
+  if (!requireNamespace("remotes", quietly = TRUE)) {
+    stop(
+      "Failed to install 'remotes', which is needed to install 'safepaths'.",
+      call. = FALSE
+    )
+  }
+  remotes::install_github("bcgov/safepaths", dependencies = TRUE)
+  if (!requireNamespace("safepaths", quietly = TRUE)) {
+    stop("Failed to install 'safepaths' from bcgov/safepaths.", call. = FALSE)
+  }
+}
+
 library(googleAnalyticsR)
 library(rsconnect)
+library(aws.s3)
 library(tidyverse)
 library(lubridate)
 library(zoo)
@@ -62,11 +80,19 @@ library(forcats)
 library(quarto)
 library(flexdashboard)
 
+base_reports <- c("pageview", "click", "referurl", "platform", "geoloc")
+extra_reports <- c("asset", "search", "google")
+
+source("R/functions/month-run-helpers.R")
+source("R/functions/gdx-web-analysis-functions.R")
+
+# The ".Renviron" file will be stored on LAN so that people can load
+
 # File paths (LAN) setup
 LAN_FOLDER <- use_network_path()
 # if 'Error:! There has been a problem. Are you sure you are connected to the VPN?'
-# connect to VPN and manually double click the 'network drive' in 'This PC' to ensure it's connected (green), then run this code again
-
+# connect to VPN and manually double click the 'network drive' in 'This PC' in Windows Explorer to ensure it's connected (green), then run this code again
+# double-check your drive mapping in .Renviron; if it's wrong, correct it, close RStudio and start fresh
 PROJECT_ROOT <- glue(
   "{LAN_FOLDER}/0. Misc/Data Science Tooling/web-hosting-and-dashboards/shinyapps_webtraffic_monitoring"
 )
@@ -84,7 +110,6 @@ for (p in paths_to_create) {
 }
 
 
-# The ".Renviron" file will be stored on LAN so that people can load
 # and do the code review with access to the credentials, but the file itself
 # will not be committed to GitHub. Each user can create their own ".Renviron" file
 #  with the same variable names but different values
@@ -122,6 +147,8 @@ GA_DATE_END <- optional_env(
 ) # default to yesterday to avoid partial current-day data
 
 #  GA Service Account Auth
+# Copy the service account JSON key from LAN into your local cloned repo as
+# ga-auth-key.json (ignored by Git)
 GA_SERVICE_EMAIL <- require_env("GA_SERVICE_EMAIL")
 GA_SERVICE_KEY <- require_env("GA_SERVICE_KEY") # full path to JSON key file
 

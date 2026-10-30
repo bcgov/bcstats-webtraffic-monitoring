@@ -24,6 +24,7 @@ source("R/gdx-run-monthly-pipeline.R")
 ```
 
 This will:
+
 1. Resolve the target month as the previous calendar month.
 2. Download the selected source-data exports into the LAN/local working data directory for that month.
 3. Analyze the data and write the monthly summary tables to the LAN/local working output directory.
@@ -51,6 +52,7 @@ This forces a specific reporting month instead of using the default previous-mon
 ## Built-in Validation
 
 The pipeline fails early when:
+
 - expected monthly report families are missing in raw input,
 - duplicate basenames are detected in selected S3 files (to prevent silent overwrite),
 - required monthly output tables are missing or empty,

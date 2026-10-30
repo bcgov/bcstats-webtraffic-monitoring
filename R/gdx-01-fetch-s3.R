@@ -12,39 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Purpose: Download monthly report CSVs from S3 to the local raw-data directory.
+
+# Keep this so the fetch step can also be sourced independently of the pipeline.
 source("R/00-setup.R")
-source("R/functions/month-run-helpers.R")
 
-library(aws.s3)
-
-# Step 1: Read required environment variables once
-env_keys <- c(
-  "AWS_ACCESS_KEY_ID",
-  "AWS_SECRET_ACCESS_KEY",
-  "AWS_DEFAULT_REGION",
-  "BCSTATS_S3_BUCKET",
-  "BCSTATS_S3_PREFIX"
-)
-
-env_values <- Sys.getenv(env_keys, unset = NA_character_)
-names(env_values) <- env_keys
-
-# Step 2: Validate missing values
-missing_env <- names(env_values)[is.na(env_values) | env_values == ""]
-if (length(missing_env) > 0) {
-  stop(
-    sprintf(
-      "Missing environment variables: %s",
-      paste(missing_env, collapse = ", ")
-    ),
-    call. = FALSE
-  )
-}
-
-# Step 3: Assign name variables from environment values for easier reference.
-bucket <- env_values[["BCSTATS_S3_BUCKET"]]
-prefix <- env_values[["BCSTATS_S3_PREFIX"]]
-region <- env_values[["AWS_DEFAULT_REGION"]]
+# Validate S3 settings even when this script is run on its own.
+s3_config <- get_s3_config(require_credentials = TRUE)
+bucket <- s3_config$bucket
+prefix <- s3_config$prefix
+region <- s3_config$region
 
 # Optional source subfolder selector for controlled ingestion from S3.
 # Example: Sys.setenv(BCSTATS_S3_SOURCE_SUBFOLDER = "UAT_20260720")
@@ -60,33 +37,21 @@ if (nzchar(source_subfolder)) {
 # Example: Sys.setenv(BCSTATS_S3_KEY_PATTERN = "/v01_auto/.*_20260910T0[12]")
 key_pattern <- Sys.getenv("BCSTATS_S3_KEY_PATTERN", unset = "")
 
-# Step 4: Resolve target month (default: previous month).
-# Override with env var GDX_TARGET_MONTH=YYYY-MM when needed.
-target_month <- resolve_target_month(mode = "previous")
+# The monthly pipeline supplies target_month; resolve it only for standalone runs.
+if (!exists("target_month", inherits = FALSE)) {
+  target_month <- resolve_target_month(mode = "previous")
+}
 target_dir <- file.path(DATA_RAW, "cms_lite", target_month)
 
-dir.create(
-  target_dir,
-  recursive = TRUE,
-  showWarnings = FALSE
-)
-
-# Clear out prior CSVs for this month before downloading.
-# This prevents stale files from an earlier run from lingering alongside the
-# current delivery and confusing downstream analysis.
-old_csvs <- list.files(target_dir, pattern = "\\.csv$", full.names = TRUE)
-if (length(old_csvs) > 0) {
-  unlink(old_csvs)
-}
-
-# Step 5: List objects from the target S3 prefix.
+# List once and validate the selection before changing local files.
 objects <- get_bucket(
   bucket = bucket,
   prefix = prefix,
-  region = region
+  region = region,
+  max = Inf
 )
 
-# Step 6: Convert S3 object metadata to a table and keep only CSV data files.
+# Convert S3 object metadata to a table and keep only CSV data files.
 file_index <- data.frame(
   key = vapply(objects, function(x) as.character(x$Key), character(1)),
   size = vapply(objects, function(x) as.numeric(x$Size), numeric(1)),
@@ -140,10 +105,53 @@ if (nrow(basename_dups) > 0) {
 }
 
 if (nrow(data_files) == 0) {
-  stop("No CSV files found in S3 prefix.", call. = FALSE)
+  stop(
+    sprintf(
+      "No S3 files matched the selection for %s. Upstream files may not be published yet.",
+      target_month
+    ),
+    call. = FALSE
+  )
 }
 
-# Step 7: Download all CSVs into DATA_RAW/cms_lite/<target_month>.
+# Reject multiple runs of the same report even when filenames differ by timestamp.
+duplicate_reports <- data_files |>
+  mutate(
+    report = str_extract(
+      basename(key),
+      "webdata_bcstats_[a-z]+_[a-z]+_monthly"
+    ),
+    part = str_extract(basename(key), "part\\d{3}")
+  ) |>
+  count(report, part, sort = TRUE) |>
+  filter(n > 1)
+
+if (nrow(duplicate_reports) > 0) {
+  stop(
+    paste0(
+      "Selection matched multiple runs for the same report(s): ",
+      paste(head(duplicate_reports$report, 10), collapse = ", "),
+      ". Narrow BCSTATS_S3_KEY_PATTERN to a single run."
+    ),
+    call. = FALSE
+  )
+}
+
+message(sprintf(
+  "Pre-flight: %s file(s) selected for %s.",
+  nrow(data_files),
+  target_month
+))
+
+dir.create(target_dir, recursive = TRUE, showWarnings = FALSE)
+
+# Remove old CSVs only after the new selection passes validation.
+old_csvs <- list.files(target_dir, pattern = "\\.csv$", full.names = TRUE)
+if (length(old_csvs) > 0) {
+  unlink(old_csvs)
+}
+
+# Download all CSVs into DATA_RAW/cms_lite/<target_month>.
 walk(data_files$key, \(key) {
   save_object(
     object = key,
@@ -153,11 +161,11 @@ walk(data_files$key, \(key) {
   )
 })
 
-# Step 8: Validate that expected monthly report families are present.
+# Validate that expected monthly report families are present.
 assert_cmslite_reports_present(target_dir)
 
 message(sprintf(
-  "Month %s: downloaded %s CSV file(s) from prefix '%s'%s to: %s",
+  "S3 download successful for month %s: %s CSV file(s) from prefix '%s'%s to: %s",
   target_month,
   nrow(data_files),
   prefix,

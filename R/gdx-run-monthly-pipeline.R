@@ -3,11 +3,9 @@
 # Optional explicit month override: Sys.setenv(GDX_TARGET_MONTH = "YYYY-MM")
 
 source("R/00-setup.R")
-source("R/functions/month-run-helpers.R")
 
 library(dplyr)
 library(stringr)
-library(aws.s3)
 
 # Resolve target month for this run.
 # If GDX_TARGET_MONTH is set, use it; otherwise force previous calendar month.
@@ -31,21 +29,10 @@ message(sprintf("Starting monthly GDX pipeline for month: %s", target_month))
 # Priority:
 # 1) explicit BCSTATS_S3_SOURCE_SUBFOLDER / BCSTATS_S3_KEY_PATTERN, else
 # 2) the documented mapping in resolve_s3_selection().
-bucket <- Sys.getenv("BCSTATS_S3_BUCKET", unset = "")
-prefix <- Sys.getenv("BCSTATS_S3_PREFIX", unset = "")
-region <- Sys.getenv("AWS_DEFAULT_REGION", unset = "")
-
-if (!nzchar(bucket) || !nzchar(prefix) || !nzchar(region)) {
-  stop(
-    "Missing S3 environment configuration for monthly pipeline.",
-    call. = FALSE
-  )
-}
-
-clean_env <- function(name) {
-  val <- Sys.getenv(name, unset = "")
-  if (nzchar(val)) str_remove(str_remove(val, "^/"), "/$") else ""
-}
+s3_config <- get_s3_config()
+bucket <- s3_config$bucket
+prefix <- s3_config$prefix
+region <- s3_config$region
 
 use_explicit_s3_selection <- tolower(Sys.getenv(
   "GDX_USE_EXPLICIT_S3_SELECTION",
@@ -54,7 +41,10 @@ use_explicit_s3_selection <- tolower(Sys.getenv(
   c("true", "1", "yes")
 
 source_subfolder_env <- if (use_explicit_s3_selection) {
-  clean_env("BCSTATS_S3_SOURCE_SUBFOLDER")
+  str_remove(
+    str_remove(Sys.getenv("BCSTATS_S3_SOURCE_SUBFOLDER", unset = ""), "^/"),
+    "/$"
+  )
 } else {
   ""
 }
@@ -85,78 +75,6 @@ if (nzchar(selection$subfolder)) {
 if (nzchar(selection$key_pattern)) {
   message(sprintf("  key pattern: %s", selection$key_pattern))
 }
-
-# Pre-flight: confirm the selection resolves to exactly one file per report
-# family before downloading. Guards against a rerun in the same generation
-# month producing two complete sets with different timestamps, which the
-# downloader's basename check cannot detect.
-objects_now <- get_bucket(
-  bucket = bucket,
-  prefix = prefix,
-  region = region,
-  max = Inf
-)
-
-selected <- tibble(
-  key = vapply(objects_now, function(x) as.character(x$Key), character(1)),
-  size = vapply(objects_now, function(x) as.numeric(x$Size), numeric(1))
-) |>
-  filter(
-    !is.na(key),
-    size > 0,
-    str_starts(key, prefix),
-    str_detect(key, "\\.csv$")
-  ) |>
-  mutate(
-    key_rel = str_remove(str_remove(key, paste0("^", fixed(prefix))), "^/")
-  )
-
-if (nzchar(selection$subfolder)) {
-  selected <- selected |>
-    filter(str_starts(key_rel, paste0(selection$subfolder, "/")))
-}
-if (nzchar(selection$key_pattern)) {
-  selected <- selected |> filter(str_detect(key_rel, selection$key_pattern))
-}
-
-if (nrow(selected) == 0) {
-  stop(
-    sprintf(
-      "No S3 files matched the selection for %s. Upstream files may not be published yet.",
-      target_month
-    ),
-    call. = FALSE
-  )
-}
-
-# One logical report per site/report family, ignoring timestamp and part number.
-duplicate_reports <- selected |>
-  mutate(
-    report = str_extract(
-      basename(key),
-      "webdata_bcstats_[a-z]+_[a-z]+_monthly"
-    ),
-    part = str_extract(basename(key), "part\\d{3}")
-  ) |>
-  count(report, part, sort = TRUE) |>
-  filter(n > 1)
-
-if (nrow(duplicate_reports) > 0) {
-  stop(
-    paste0(
-      "Selection matched multiple runs for the same report(s): ",
-      paste(head(duplicate_reports$report, 10), collapse = ", "),
-      ". Narrow BCSTATS_S3_KEY_PATTERN to a single run."
-    ),
-    call. = FALSE
-  )
-}
-
-message(sprintf(
-  "Pre-flight: %s file(s) selected for %s.",
-  nrow(selected),
-  target_month
-))
 
 # Ensure downstream scripts use one consistent month and selection.
 Sys.setenv(GDX_TARGET_MONTH = target_month)

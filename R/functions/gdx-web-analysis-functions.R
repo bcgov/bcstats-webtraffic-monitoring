@@ -13,6 +13,12 @@
 # limitations under the License.
 
 # CMS Lite analysis helper functions
+# These functions use dplyr, purrr, readr, stringr, janitor, and rlang.
+
+# Metric Definitions
+# Impressions: The total number of times your ad or link was displayed on a screen.
+# Clicks: The total number of times users actually clicked on the displayed link or ad.
+# CTR: The ratio showing how often an impression results in a click.
 
 # Map canonical names to all known CMS Lite source column variants.
 cmslite_name_map <- list(
@@ -63,6 +69,10 @@ cmslite_name_map <- list(
   )
 )
 
+# Merge source columns `aliases` in priority order into canonical `output`.
+# Input: data frame, character alias names, and one output name.
+# Returns the data frame unchanged if no alias exists; otherwise renames or
+# coalesces aliases. Used by normalize_cmslite_names().
 coalesce_aliases <- function(df, aliases, output) {
   present <- aliases[aliases %in% names(df)]
   if (length(present) == 0) {
@@ -77,6 +87,9 @@ coalesce_aliases <- function(df, aliases, output) {
     dplyr::select(-dplyr::any_of(setdiff(present, output)))
 }
 
+# Rename/coalesce known source fields using cmslite_name_map.
+# Input: a cleaned CMS Lite data frame. Returns a data frame with canonical
+# names; depends on coalesce_aliases().
 normalize_cmslite_names <- function(df) {
   purrr::reduce(
     .x = names(cmslite_name_map),
@@ -85,6 +98,10 @@ normalize_cmslite_names <- function(df) {
   )
 }
 
+# Load and normalize CSV parts for one site and report family.
+# Inputs: raw_dir (search root), site and report (filename components).
+# Returns a row-bound data frame with numeric metrics and source_file;
+# errors when no files match. Depends on normalize_cmslite_names().
 load_report <- function(raw_dir, site, report) {
   all_csv <- list.files(
     raw_dir,
@@ -133,6 +150,9 @@ load_report <- function(raw_dir, site, report) {
     purrr::list_rbind()
 }
 
+# Summarize normalized page views, sessions and users by date and page URL.
+# Input: load_report() data with date, page_url and those three metrics.
+# Returns a list of daily and top_pages tables.
 analyze_pageview <- function(df) {
   list(
     daily = df |>
@@ -154,6 +174,9 @@ analyze_pageview <- function(df) {
   )
 }
 
+# Summarize normalized clicks by date and target URL.
+# Input: load_report() data with date, target_url and click_count.
+# Returns a list of daily and top_targets tables.
 analyze_click <- function(df) {
   list(
     daily = df |>
@@ -171,6 +194,9 @@ analyze_click <- function(df) {
   )
 }
 
+# Summarize normalized page views by referrer URL.
+# Input: load_report() data with referrer_url and page_views.
+# Returns a list containing the top_referrers table.
 analyze_referurl <- function(df) {
   list(
     top_referrers = df |>
@@ -182,6 +208,9 @@ analyze_referurl <- function(df) {
   )
 }
 
+# Summarize normalized page views, sessions and users by operating system.
+# Input: load_report() data with os and those three metrics.
+# Returns a list containing the by_os table.
 analyze_platform <- function(df) {
   list(
     by_os = df |>
@@ -195,6 +224,10 @@ analyze_platform <- function(df) {
   )
 }
 
+# Summarize normalized traffic by available country and/or region fields.
+# Input: load_report() data with at least one of country/region and the
+# page_views, sessions and users metrics. Returns a list with by_geo;
+# errors if neither geographic field exists.
 analyze_geoloc <- function(df) {
   group_vars <- intersect(c("country", "region"), names(df))
 
@@ -217,6 +250,9 @@ analyze_geoloc <- function(df) {
   )
 }
 
+# Summarize normalized asset downloads by date and asset identity.
+# Input: load_report() data with date, asset_file, asset_url and downloads.
+# Returns a list of daily and top_assets tables.
 analyze_asset <- function(df) {
   list(
     daily = df |>
@@ -234,6 +270,9 @@ analyze_asset <- function(df) {
   )
 }
 
+# Summarize normalized on-site searches by search term.
+# Input: load_report() data with search_term and searches.
+# Returns a list containing the top_terms table.
 analyze_search <- function(df) {
   list(
     top_terms = df |>
@@ -245,6 +284,9 @@ analyze_search <- function(df) {
   )
 }
 
+# Summarize Google search clicks/impressions and calculate CTR by query/page.
+# Input: load_report() data with query, page, click_count and impressions.
+# Returns a list containing the top_queries table (CTR is NA for zero impressions).
 analyze_google <- function(df) {
   list(
     top_queries = df |>
@@ -265,6 +307,24 @@ analyze_google <- function(df) {
       dplyr::arrange(dplyr::desc(clicks))
   )
 }
+
+# Extract a nested analysis table for each site and add its site label.
+# Inputs: named analysis list and character path within each site's results.
+# Returns row-bound tables with a site column; missing paths are skipped.
+combine_sites <- function(analysis, path) {
+  purrr::imap(analysis, \(site_analysis, site) {
+    tbl <- purrr::pluck(site_analysis, !!!path)
+    if (is.null(tbl)) {
+      return(NULL)
+    }
+    dplyr::mutate(tbl, site = site, .before = 1)
+  }) |>
+    purrr::list_rbind()
+}
+
+# Rank BC Data Catalogue target URLs by click count.
+# Inputs: load_report() click data with target_url/click_count and a row limit.
+# Returns a ranked URL-level data frame of at most top_n rows.
 analyze_bcdc_click <- function(df, top_n = 20) {
   df |>
     dplyr::filter(
@@ -282,6 +342,9 @@ analyze_bcdc_click <- function(df, top_n = 20) {
     dplyr::mutate(rank = dplyr::row_number(), .before = target_url)
 }
 
+# Summarize BC Data Catalogue asset downloads by file and URL.
+# Input: load_report() asset data with asset_file, asset_url and downloads.
+# Returns a downloads-ranked data frame.
 analyze_bcdc_asset <- function(df) {
   df |>
     dplyr::filter(
@@ -296,8 +359,3 @@ analyze_bcdc_asset <- function(df) {
     ) |>
     dplyr::arrange(dplyr::desc(downloads))
 }
-
-# Metric Definitions
-# Impressions: The total number of times your ad or link was displayed on a screen.
-# Clicks: The total number of times users actually clicked on the displayed link or ad.
-# CTR: The ratio showing how often an impression results in a click.

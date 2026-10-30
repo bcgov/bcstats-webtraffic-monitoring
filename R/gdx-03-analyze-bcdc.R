@@ -24,12 +24,6 @@
 
 source("R/00-setup.R")
 
-library(dplyr)
-library(readr)
-library(stringr)
-
-source("R/functions/gdx-web-analysis-functions.R")
-
 if (!exists("govstats_click")) {
   stop(
     "govstats_click not found in environment. Run R/gdx-02-analyze.R first.",
@@ -39,6 +33,7 @@ if (!exists("govstats_click")) {
 
 # 1) URL-level: top 50 clicked BCDC target URLs
 bcdc_top_50_clicks <- analyze_bcdc_click(govstats_click, top_n = 50)
+
 write_csv(
   bcdc_top_50_clicks,
   file.path(OUTPUT_TABLES, "bcdc_top_50_clicks.csv")
@@ -63,7 +58,7 @@ bcdc_priority_datasets <- govstats_click |>
   ) |>
   filter(!is.na(dataset_uuid)) |>
   summarise(
-    total_clicks = sum(clicks, na.rm = TRUE),
+    total_clicks = sum(click_count, na.rm = TRUE),
     example_url = first(target_url),
     .by = dataset_uuid
   ) |>
@@ -106,13 +101,11 @@ if (!all(file.exists(km_paths))) {
 km_asset <- read_csv(km_paths[["asset"]], show_col_types = FALSE) |>
   rename(
     rank = ...1,
-    file_name = `File Name`,
     url = `Asset URL`,
     count = `Download Count`,
     share = `% of Downloads`
   ) |>
-  mutate(source = "asset_downloads") |>
-  filter(!is.na(rank), !is.na(url), !is.na(count))
+  mutate(source = "asset_downloads")
 
 km_downloaded <- read_csv(km_paths[["downloaded"]], show_col_types = FALSE) |>
   rename(
@@ -121,8 +114,7 @@ km_downloaded <- read_csv(km_paths[["downloaded"]], show_col_types = FALSE) |>
     count = `Download Click Count`,
     share = `% of Downloads`
   ) |>
-  mutate(source = "download_clicks") |>
-  filter(!is.na(rank), !is.na(url), !is.na(count))
+  mutate(source = "download_clicks")
 
 km_offsite <- read_csv(km_paths[["offsite"]], show_col_types = FALSE) |>
   rename(
@@ -131,14 +123,14 @@ km_offsite <- read_csv(km_paths[["offsite"]], show_col_types = FALSE) |>
     count = `Offsite Click Count`,
     share = `% of Offsite Clicks`
   ) |>
-  mutate(source = "offsite_clicks") |>
-  filter(!is.na(rank), !is.na(url), !is.na(count))
+  mutate(source = "offsite_clicks")
 
 km_unified <- bind_rows(
   km_asset |> select(source, rank, url, count),
   km_downloaded |> select(source, rank, url, count),
   km_offsite |> select(source, rank, url, count)
-)
+) |>
+  filter(!is.na(rank), !is.na(url), !is.na(count))
 
 km_priority_urls <- km_unified |>
   summarise(
@@ -185,8 +177,12 @@ bcdc_cms_final <- read_csv(
   file.path(OUTPUT_TABLES, "bcdc_priority_datasets.csv"),
   show_col_types = FALSE
 ) |>
-  rename(cms_clicks = total_clicks, cms_rank = priority_rank) |>
-  select(cms_rank, dataset_uuid, dataset_url, cms_clicks)
+  select(
+    cms_rank = priority_rank,
+    dataset_uuid,
+    dataset_url,
+    cms_clicks = total_clicks
+  )
 
 km_bcdc_final <- read_csv(
   file.path(OUTPUT_TABLES, "km_priority_bcdc_datasets.csv"),

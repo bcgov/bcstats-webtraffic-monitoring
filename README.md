@@ -59,7 +59,7 @@ The GDX source data is delivered as monthly data exports and is used to validate
 
 Main scripts:
 
-- `R/gdx-run-monthly-pipeline.R` — master monthly pipeline for the BC Stats public web dashboard
+- `R/gdx-run-monthly-pipeline.R` — overall monthly pipeline for the BC Stats public web dashboard
 - `R/gdx-01-fetch-s3.R` — downloads the selected source-data CSV files from S3
 - `R/gdx-02-analyze.R` — builds the monthly summary tables for the dashboard
 - `R/gdx-03-analyze-bcdc.R` — BCDC-focused analysis and dataset rankings
@@ -179,7 +179,7 @@ source("R/apps-06-executive-summary.R")
 source("R/apps-run-weekly-pipeline.R")
 ```
 
-The master script handles the weekly refresh and renders the dashboard for the app reporting stream.
+The overall run script handles the weekly refresh and renders the dashboard for the app reporting stream.
 
 ```r
 quarto::quarto_render("Report/shinyapps_dashboard.qmd")

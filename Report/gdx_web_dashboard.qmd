@@ -50,7 +50,8 @@ OUTPUT_TABLES <- glue("{PROJECT_ROOT}/outputs/tables")
 # back to the legacy flat files so older outputs still render.
 cmslite_root <- file.path(OUTPUT_TABLES, "cms_lite")
 cmslite_months <- if (dir.exists(cmslite_root)) {
-  sort(list.dirs(cmslite_root, recursive = FALSE, full.names = FALSE))
+  months <- list.dirs(cmslite_root, recursive = FALSE, full.names = FALSE)
+  sort(months[grepl("^[0-9]{4}-(0[1-9]|1[0-2])$", months)])
 } else {
   character()
 }
@@ -114,7 +115,7 @@ bind_cmslite_monthly <- function(name) {
   }
 
   list_rbind(
-    imap(tbls, \(x, month) dplyr::mutate(x, month = month, month_label = cmslite_month_label(month), .before = 1))
+    imap(tbls, \(x, month) mutate(x, month = month, month_label = cmslite_month_label(month), .before = 1))
   )
 }
 
@@ -287,15 +288,6 @@ previous_month <- if (length(cmslite_months) > 1) cmslite_months[length(cmslite_
 current_month_str <- if (!is.na(current_month)) cmslite_month_label(current_month) else ""
 previous_month_str <- if (!is.na(previous_month)) cmslite_month_label(previous_month) else NA_character_
 
-# Proper web-property names. coalesce() keeps unknown sites working.
-site_label_map <- c(
-  all_sites  = "All Sites",
-  outcomes   = "Student Outcomes",
-  antiracism = "Anti-Racism Data Act",
-  govstats   = "BC Stats"
-)
-site_label <- function(s) coalesce(unname(site_label_map[s]), s)
-
 site_short_map <- c(
   all_sites  = "All Sites",
   outcomes   = "Student Outcomes",
@@ -408,7 +400,7 @@ shorten_url <- function(x, max_chars = 55) {
 site_dropdown_barh <- function(data, label_col, value_col, value_name,
                                title_prefix, top_n = 15, pre_aggregate = FALSE,
                                show_dropdown = TRUE, include_all_sites = FALSE,
-                               default_site = NULL) {
+                               default_site = NULL, left_margin = 10) {
   site_list <- sort(unique(data$site))
 
   # With a single source there is nothing to switch between, so suppress the
@@ -528,7 +520,7 @@ site_dropdown_barh <- function(data, label_col, value_col, value_name,
                    categoryorder = "trace"),
       updatemenus = updatemenus,
       plot_bgcolor = "#ffffff", paper_bgcolor = "#ffffff",
-      margin = list(l = 10, r = 30, t = top_margin, b = 30), bargap = 0.3
+      margin = list(l = left_margin, r = 30, t = top_margin, b = 30), bargap = 0.3
     ) |>
     config(
       displaylogo = plotly_config$displaylogo,
@@ -631,11 +623,11 @@ daily_site_dropdown_line <- function(data, value_col, value_name, title_prefix,
 ## Row {height=210px}
 
 ::: {.valuebox color="primary" title="Page Views in `r current_month_str``r pv_delta`"}
-`r comma(total_page_views)`
+`r label_comma()(total_page_views)`
 :::
 
 ::: {.valuebox color="info" title="Sessions in `r current_month_str``r sessions_delta`"}
-`r comma(total_sessions)`
+`r label_comma()(total_sessions)`
 :::
 
 ::: {.valuebox color="secondary" title="Page Views per Session in `r current_month_str``r pv_per_session_delta`"}
@@ -643,7 +635,7 @@ daily_site_dropdown_line <- function(data, value_col, value_name, title_prefix,
 :::
 
 ::: {.valuebox color="success" title="Clicks in `r current_month_str``r clicks_delta`"}
-`r comma(total_clicks)`
+`r label_comma()(total_clicks)`
 :::
 
 <!-- ::: {.callout-note appearance="minimal" collapse="true"}
@@ -792,19 +784,19 @@ www2.gov.bc.ca/gov/content/data/statistics).
 ## Row {height=210px}
 
 ::: {.valuebox color="primary" title="Asset Downloads in `r current_month_str``r downloads_delta`"}
-`r comma(total_downloads)`
+`r label_comma()(total_downloads)`
 :::
 
 ::: {.valuebox color="info" title="Site Searches in `r current_month_str``r searches_delta`"}
-`r comma(total_searches)`
+`r label_comma()(total_searches)`
 :::
 
 ::: {.valuebox color="success" title="Google Clicks in `r current_month_str``r g_clicks_delta`"}
-`r comma(total_g_clicks)`
+`r label_comma()(total_g_clicks)`
 :::
 
 ::: {.valuebox color="secondary" title="Google Impressions in `r current_month_str``r g_impress_delta`"}
-`r comma(total_g_impress)`
+`r label_comma()(total_g_impress)`
 :::
 
 ## Row {height=500px}
@@ -856,7 +848,7 @@ if (has_assets && !is.null(top_assets)) {
     mutate(
       fname = ifelse(is.na(asset_file) | asset_file == "", basename(asset_url), asset_file),
       full_label = coalesce(asset_url, fname),
-      label = shorten_url(coalesce(asset_url, fname))
+      label = shorten_url(coalesce(asset_url, fname), max_chars = 30)
     ) |>
     arrange(desc(downloads)) |>
     slice_head(n = 15)
@@ -866,7 +858,7 @@ if (has_assets && !is.null(top_assets)) {
     label_col = "label", value_col = "downloads",
     value_name = "Downloads",
     title_prefix = paste0("Top Downloaded Assets (", current_month_str, ")"),
-    top_n = 15, show_dropdown = FALSE
+    top_n = 15, show_dropdown = FALSE, left_margin = 220
   )
 } else {
   plot_ly() |>
@@ -918,12 +910,13 @@ if (has_google) {
     filter(month == current_month) |>
     arrange(desc(clicks)) |>
     slice_head(n = 10) |>
-    transmute(
+    mutate(
       Query = query,
       Page = page,
       Clicks = clicks,
       Impressions = impressions,
-      CTR = percent(ctr, accuracy = 0.1)
+      CTR = percent(ctr, accuracy = 0.1),
+      .keep = "none"
     )
 
   datatable(

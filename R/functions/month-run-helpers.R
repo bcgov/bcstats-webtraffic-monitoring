@@ -1,8 +1,42 @@
 # Shared helpers for monthly GDX web dashboard runs
+# Sourced by 00-setup.R after tidyverse, lubridate and glue are loaded.
 
-library(stringr)
 library(glue)
 
+# Return `b` only when `a` is NULL; inputs can be any values.
+# Used by resolve_target_month() to choose a month override.
+`%||%` <- function(a, b) if (is.null(a)) b else a
+
+# Read required S3 settings from the environment, optionally checking credentials.
+# Input: require_credentials (logical). Returns bucket/prefix/region as a list;
+# errors if a required setting is empty. The download step uses credentials.
+get_s3_config <- function(require_credentials = FALSE) {
+  keys <- c("BCSTATS_S3_BUCKET", "BCSTATS_S3_PREFIX", "AWS_DEFAULT_REGION")
+  if (require_credentials) {
+    keys <- c(keys, "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY")
+  }
+  values <- Sys.getenv(keys, unset = "")
+  names(values) <- keys
+  missing <- names(values)[!nzchar(values)]
+  if (length(missing) > 0) {
+    stop(
+      sprintf(
+        "Missing environment variables: %s",
+        paste(missing, collapse = ", ")
+      ),
+      call. = FALSE
+    )
+  }
+  list(
+    bucket = values[["BCSTATS_S3_BUCKET"]],
+    prefix = values[["BCSTATS_S3_PREFIX"]],
+    region = values[["AWS_DEFAULT_REGION"]]
+  )
+}
+
+# Resolve a reporting month from `month`, GDX_TARGET_MONTH, or the prior month.
+# Inputs: optional YYYY-MM month and mode ("previous" or "explicit").
+# Returns a YYYY-MM string or errors on missing/invalid input; uses %||%.
 resolve_target_month <- function(
   month = NULL,
   mode = c("previous", "explicit")
@@ -50,6 +84,8 @@ resolve_target_month <- function(
 # From 2026-09 onward the provider runs an automated job on the 4th of the
 # following month, writing to {report_name}/v01_auto/. See
 # docs/BC_STATS_S3_FILE_GUIDE.md for the authoritative mapping.
+# Input: target_month as YYYY-MM. Returns subfolder, key_pattern and rule in a
+# list; errors for months without a defined selection rule.
 resolve_s3_selection <- function(target_month) {
   if (!str_detect(target_month, "^\\d{4}-\\d{2}$")) {
     stop(
@@ -118,6 +154,9 @@ resolve_s3_selection <- function(target_month) {
   )
 }
 
+# Check that each expected site/report family has a CSV under raw_dir.
+# Input: raw_dir (directory path). Returns invisible TRUE or errors with missing
+# families; requires base_reports and extra_reports defined in 00-setup.R.
 assert_cmslite_reports_present <- function(raw_dir) {
   all_csv <- list.files(
     raw_dir,
@@ -128,18 +167,9 @@ assert_cmslite_reports_present <- function(raw_dir) {
   files <- basename(all_csv)
 
   expected <- list(
-    outcomes = c("pageview", "click", "referurl", "platform", "geoloc"),
-    antiracism = c("pageview", "click", "referurl", "platform", "geoloc"),
-    govstats = c(
-      "pageview",
-      "click",
-      "referurl",
-      "platform",
-      "geoloc",
-      "asset",
-      "search",
-      "google"
-    )
+    outcomes = base_reports,
+    antiracism = base_reports,
+    govstats = c(base_reports, extra_reports)
   )
 
   missing <- c()
@@ -165,6 +195,9 @@ assert_cmslite_reports_present <- function(raw_dir) {
   invisible(TRUE)
 }
 
+# Verify required monthly CSV tables exist and contain rows; warn for optional ones.
+# Input: output_dir (monthly tables directory). Returns invisible TRUE or errors
+# for missing/empty core tables.
 assert_monthly_outputs <- function(output_dir) {
   required_core <- c(
     "cmslite_daily",
@@ -181,6 +214,8 @@ assert_monthly_outputs <- function(output_dir) {
     "cmslite_google_queries"
   )
 
+  # Check one table family by name; return invisible TRUE (or FALSE for a
+  # missing optional table), warn for optional failures, error for core failures.
   check_one <- function(name, required = TRUE) {
     f <- list.files(
       output_dir,
@@ -226,6 +261,9 @@ assert_monthly_outputs <- function(output_dir) {
   invisible(TRUE)
 }
 
+# Check a report's dates or YYYY-MM values against its expected month.
+# Inputs: data frame, YYYY-MM target, label for diagnostics and date column name.
+# Returns invisible TRUE; warns if dates cannot be checked, errors on mismatch.
 assert_data_month <- function(df, target_month, label, date_col = "date") {
   if (!date_col %in% names(df)) {
     warning(
@@ -283,6 +321,7 @@ assert_data_month <- function(df, target_month, label, date_col = "date") {
 # Resolve the column carrying the reporting period for a loaded report.
 # Most reports normalize to `date`; the two search reports keep a month column
 # whose name is prefixed by its source table.
+# Input: report data frame. Returns a column name or NA_character_ if absent.
 find_period_col <- function(df) {
   if ("date" %in% names(df)) {
     return("date")
@@ -295,6 +334,9 @@ find_period_col <- function(df) {
 }
 
 # Check every loaded report in a named list against the target month.
+# Inputs: named list of report data frames and YYYY-MM month.
+# Returns invisible TRUE; warns for absent periods and delegates checks to
+# find_period_col() and assert_data_month().
 assert_reports_month <- function(reports, target_month) {
   purrr::iwalk(reports, \(df, label) {
     col <- find_period_col(df)
@@ -311,5 +353,3 @@ assert_reports_month <- function(reports, target_month) {
   })
   invisible(TRUE)
 }
-
-`%||%` <- function(a, b) if (is.null(a)) b else a
