@@ -400,7 +400,8 @@ shorten_url <- function(x, max_chars = 55) {
 site_dropdown_barh <- function(data, label_col, value_col, value_name,
                                title_prefix, top_n = 15, pre_aggregate = FALSE,
                                show_dropdown = TRUE, include_all_sites = FALSE,
-                               default_site = NULL, left_margin = 10) {
+                               default_site = NULL, left_margin = 10,
+                               distinct_y = FALSE) {
   site_list <- sort(unique(data$site))
 
   # With a single source there is nothing to switch between, so suppress the
@@ -454,7 +455,7 @@ site_dropdown_barh <- function(data, label_col, value_col, value_name,
     p <- add_bars(
       p,
       x = d[[value_col]],
-      y = d[[label_col]],
+      y = if (distinct_y) seq_len(nrow(d)) else d[[label_col]],
       orientation = "h",
       visible = s == default_site,
       marker = list(color = marker_color,
@@ -517,7 +518,10 @@ site_dropdown_barh <- function(data, label_col, value_col, value_name,
                    tickfont = modifyList(bc_font, list(size = 10, color = "#5c6b7a"))),
       yaxis = list(title = "", automargin = TRUE,
                    tickfont = modifyList(bc_font, list(size = 10, color = "#2d2d2d")),
-                   categoryorder = "trace"),
+                   categoryorder = "trace",
+                   tickmode = if (distinct_y) "array" else "auto",
+                   tickvals = if (distinct_y) seq_len(nrow(default_d)) else NULL,
+                   ticktext = if (distinct_y) default_d[[label_col]] else NULL),
       updatemenus = updatemenus,
       plot_bgcolor = "#ffffff", paper_bgcolor = "#ffffff",
       margin = list(l = left_margin, r = 30, t = top_margin, b = 30), bargap = 0.3
@@ -858,7 +862,7 @@ if (has_assets && !is.null(top_assets)) {
     label_col = "label", value_col = "downloads",
     value_name = "Downloads",
     title_prefix = paste0("Top Downloaded Assets (", current_month_str, ")"),
-    top_n = 15, show_dropdown = FALSE, left_margin = 220
+    top_n = 15, show_dropdown = FALSE, left_margin = 220, distinct_y = TRUE
   )
 } else {
   plot_ly() |>
