@@ -1,5 +1,11 @@
 # BC Stats Web Traffic Monitoring
 
+<!-- badges: start -->
+
+[![Lifecycle: Experimental](https://img.shields.io/badge/Lifecycle-Experimental-339999)](https://github.com/bcgov/repomountie/blob/master/doc/lifecycle-badges.md) [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/license/apache-2-0/)
+
+<!-- badges: end -->
+
 This repository monitors web traffic across two reporting families:
 
 1. Shiny app usage and concurrency metrics
@@ -216,11 +222,19 @@ Use `docs/` for operational notes, runbooks, and explanation of data-source assu
 
 ## Contributing
 
-- keep the source code in `R/`
-- keep report definitions in `Report/`
-- keep generated files in `outputs/` or local secure storage, not in the tracked repo by default
-- never commit local credentials or auth material
-- keep changes small and explicit so it is easy to trace pipeline updates
+See [CONTRIBUTING.md](CONTRIBUTING.md) for how to propose changes. This project follows the [Contributor Code of Conduct](CODE_OF_CONDUCT.md). Keep generated data and credentials out of commits.
+
+## Contact
+
+For access questions or help with the `safepaths` configuration key, contact [Zhijia Ju](https://github.com/Anakin2009) or [open an issue](https://github.com/bcgov/bcstats-webtraffic-monitoring/issues).
+
+## License
+
+Copyright 2026 Province of British Columbia
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not use this project except in compliance with the License. You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0.
+
+Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the [LICENSE](LICENSE) file for the specific language governing permissions and limitations under the License.
 
 ## Notes
 
