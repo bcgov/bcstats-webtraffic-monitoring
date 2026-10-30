@@ -237,7 +237,7 @@ assert_monthly_outputs <- function(output_dir) {
       }
     }
 
-    x <- readr::read_csv(f[1], show_col_types = FALSE)
+    x <- read_csv(f[1], show_col_types = FALSE)
     if (nrow(x) == 0) {
       if (required) {
         stop(
@@ -255,8 +255,8 @@ assert_monthly_outputs <- function(output_dir) {
     invisible(TRUE)
   }
 
-  purrr::walk(required_core, check_one, required = TRUE)
-  purrr::walk(required_govstats, check_one, required = FALSE)
+  walk(required_core, check_one, required = TRUE)
+  walk(required_govstats, check_one, required = FALSE)
 
   invisible(TRUE)
 }
@@ -286,7 +286,7 @@ assert_data_month <- function(df, target_month, label, date_col = "date") {
   months_present <- if (is_month_only) {
     sort(unique(raw))
   } else {
-    dates <- suppressWarnings(lubridate::ymd(raw))
+    dates <- suppressWarnings(ymd(raw))
     dates <- dates[!is.na(dates)]
     if (length(dates) == 0) {
       warning(
@@ -338,7 +338,7 @@ find_period_col <- function(df) {
 # Returns invisible TRUE; warns for absent periods and delegates checks to
 # find_period_col() and assert_data_month().
 assert_reports_month <- function(reports, target_month) {
-  purrr::iwalk(reports, \(df, label) {
+  iwalk(reports, \(df, label) {
     col <- find_period_col(df)
     if (is.na(col)) {
       warning(

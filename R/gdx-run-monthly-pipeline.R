@@ -100,7 +100,7 @@ dashboard_file <- sprintf(
 # Cap the dashboard at the reporting month so the artifact matches its filename.
 Sys.setenv(GDX_DASHBOARD_MAX_MONTH = target_month)
 
-quarto::quarto_render(
+quarto_render(
   dashboard_qmd,
   output_file = dashboard_file
 )

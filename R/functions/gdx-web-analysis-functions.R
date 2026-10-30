@@ -80,18 +80,18 @@ coalesce_aliases <- function(df, aliases, output) {
   }
 
   if (length(present) == 1) {
-    return(dplyr::rename(df, !!output := dplyr::all_of(present)))
+    return(rename(df, !!output := all_of(present)))
   }
 
-  dplyr::mutate(df, !!output := dplyr::coalesce(!!!rlang::syms(present))) |>
-    dplyr::select(-dplyr::any_of(setdiff(present, output)))
+  mutate(df, !!output := coalesce(!!!rlang::syms(present))) |>
+    select(-any_of(setdiff(present, output)))
 }
 
 # Rename/coalesce known source fields using cmslite_name_map.
 # Input: a cleaned CMS Lite data frame. Returns a data frame with canonical
 # names; depends on coalesce_aliases().
 normalize_cmslite_names <- function(df) {
-  purrr::reduce(
+  reduce(
     .x = names(cmslite_name_map),
     .f = \(acc, nm) coalesce_aliases(acc, cmslite_name_map[[nm]], nm),
     .init = df
@@ -111,7 +111,7 @@ load_report <- function(raw_dir, site, report) {
   )
 
   report_pattern <- paste0("webdata_bcstats_", site, "_", report, "_monthly")
-  matched <- all_csv[stringr::str_detect(basename(all_csv), report_pattern)]
+  matched <- all_csv[str_detect(basename(all_csv), report_pattern)]
 
   if (length(matched) == 0) {
     stop(
@@ -120,19 +120,19 @@ load_report <- function(raw_dir, site, report) {
     )
   }
 
-  purrr::map(
+  map(
     matched,
     \(f) {
-      readr::read_csv(
+      read_csv(
         f,
         show_col_types = FALSE,
-        col_types = readr::cols(.default = readr::col_guess())
+        col_types = cols(.default = col_guess())
       ) |>
-        janitor::clean_names(case = "snake") |>
+        clean_names(case = "snake") |>
         normalize_cmslite_names() |>
-        dplyr::mutate(
-          dplyr::across(
-            dplyr::any_of(c(
+        mutate(
+          across(
+            any_of(c(
               "click_count",
               "impressions",
               "downloads",
@@ -141,13 +141,13 @@ load_report <- function(raw_dir, site, report) {
               "sessions",
               "users"
             )),
-            ~ suppressWarnings(readr::parse_number(as.character(.x)))
+            ~ suppressWarnings(parse_number(as.character(.x)))
           )
         ) |>
-        dplyr::mutate(source_file = basename(f))
+        mutate(source_file = basename(f))
     }
   ) |>
-    purrr::list_rbind()
+    list_rbind()
 }
 
 # Summarize normalized page views, sessions and users by date and page URL.
@@ -156,21 +156,21 @@ load_report <- function(raw_dir, site, report) {
 analyze_pageview <- function(df) {
   list(
     daily = df |>
-      dplyr::summarise(
+      summarise(
         page_views = sum(page_views, na.rm = TRUE),
         sessions = sum(sessions, na.rm = TRUE),
         users = sum(users, na.rm = TRUE),
         .by = date
       ) |>
-      dplyr::arrange(date),
+      arrange(date),
     top_pages = df |>
-      dplyr::summarise(
+      summarise(
         page_views = sum(page_views, na.rm = TRUE),
         sessions = sum(sessions, na.rm = TRUE),
         users = sum(users, na.rm = TRUE),
         .by = page_url
       ) |>
-      dplyr::arrange(dplyr::desc(page_views))
+      arrange(desc(page_views))
   )
 }
 
@@ -180,17 +180,17 @@ analyze_pageview <- function(df) {
 analyze_click <- function(df) {
   list(
     daily = df |>
-      dplyr::summarise(
+      summarise(
         clicks = sum(click_count, na.rm = TRUE),
         .by = date
       ) |>
-      dplyr::arrange(date),
+      arrange(date),
     top_targets = df |>
-      dplyr::summarise(
+      summarise(
         clicks = sum(click_count, na.rm = TRUE),
         .by = target_url
       ) |>
-      dplyr::arrange(dplyr::desc(clicks))
+      arrange(desc(clicks))
   )
 }
 
@@ -200,11 +200,11 @@ analyze_click <- function(df) {
 analyze_referurl <- function(df) {
   list(
     top_referrers = df |>
-      dplyr::summarise(
+      summarise(
         page_views = sum(page_views, na.rm = TRUE),
         .by = referrer_url
       ) |>
-      dplyr::arrange(dplyr::desc(page_views))
+      arrange(desc(page_views))
   )
 }
 
@@ -214,13 +214,13 @@ analyze_referurl <- function(df) {
 analyze_platform <- function(df) {
   list(
     by_os = df |>
-      dplyr::summarise(
+      summarise(
         page_views = sum(page_views, na.rm = TRUE),
         sessions = sum(sessions, na.rm = TRUE),
         users = sum(users, na.rm = TRUE),
         .by = os
       ) |>
-      dplyr::arrange(dplyr::desc(page_views))
+      arrange(desc(page_views))
   )
 }
 
@@ -240,13 +240,13 @@ analyze_geoloc <- function(df) {
 
   list(
     by_geo = df |>
-      dplyr::summarise(
+      summarise(
         page_views = sum(page_views, na.rm = TRUE),
         sessions = sum(sessions, na.rm = TRUE),
         users = sum(users, na.rm = TRUE),
-        .by = dplyr::all_of(group_vars)
+        .by = all_of(group_vars)
       ) |>
-      dplyr::arrange(dplyr::desc(page_views))
+      arrange(desc(page_views))
   )
 }
 
@@ -256,17 +256,17 @@ analyze_geoloc <- function(df) {
 analyze_asset <- function(df) {
   list(
     daily = df |>
-      dplyr::summarise(
+      summarise(
         downloads = sum(downloads, na.rm = TRUE),
         .by = date
       ) |>
-      dplyr::arrange(date),
+      arrange(date),
     top_assets = df |>
-      dplyr::summarise(
+      summarise(
         downloads = sum(downloads, na.rm = TRUE),
         .by = c(asset_file, asset_url)
       ) |>
-      dplyr::arrange(dplyr::desc(downloads))
+      arrange(desc(downloads))
   )
 }
 
@@ -276,11 +276,11 @@ analyze_asset <- function(df) {
 analyze_search <- function(df) {
   list(
     top_terms = df |>
-      dplyr::summarise(
+      summarise(
         searches = sum(searches, na.rm = TRUE),
         .by = search_term
       ) |>
-      dplyr::arrange(dplyr::desc(searches))
+      arrange(desc(searches))
   )
 }
 
@@ -290,21 +290,21 @@ analyze_search <- function(df) {
 analyze_google <- function(df) {
   list(
     top_queries = df |>
-      dplyr::mutate(
-        dplyr::across(
+      mutate(
+        across(
           c(click_count, impressions),
-          ~ readr::parse_number(as.character(.x))
+          ~ parse_number(as.character(.x))
         )
       ) |>
-      dplyr::summarise(
+      summarise(
         clicks = sum(click_count, na.rm = TRUE),
         impressions = sum(impressions, na.rm = TRUE),
         .by = c(query, page)
       ) |>
-      dplyr::mutate(
-        ctr = dplyr::if_else(impressions > 0, clicks / impressions, NA_real_)
+      mutate(
+        ctr = if_else(impressions > 0, clicks / impressions, NA_real_)
       ) |>
-      dplyr::arrange(dplyr::desc(clicks))
+      arrange(desc(clicks))
   )
 }
 
@@ -312,14 +312,14 @@ analyze_google <- function(df) {
 # Inputs: named analysis list and character path within each site's results.
 # Returns row-bound tables with a site column; missing paths are skipped.
 combine_sites <- function(analysis, path) {
-  purrr::imap(analysis, \(site_analysis, site) {
-    tbl <- purrr::pluck(site_analysis, !!!path)
+  imap(analysis, \(site_analysis, site) {
+    tbl <- pluck(site_analysis, !!!path)
     if (is.null(tbl)) {
       return(NULL)
     }
-    dplyr::mutate(tbl, site = site, .before = 1)
+    mutate(tbl, site = site, .before = 1)
   }) |>
-    purrr::list_rbind()
+    list_rbind()
 }
 
 # Rank BC Data Catalogue target URLs by click count.
@@ -327,19 +327,19 @@ combine_sites <- function(analysis, path) {
 # Returns a ranked URL-level data frame of at most top_n rows.
 analyze_bcdc_click <- function(df, top_n = 20) {
   df |>
-    dplyr::filter(
-      stringr::str_detect(
+    filter(
+      str_detect(
         target_url,
-        stringr::regex("catalogue\\.data\\.gov\\.bc\\.ca", ignore_case = TRUE)
+        regex("catalogue\\.data\\.gov\\.bc\\.ca", ignore_case = TRUE)
       )
     ) |>
-    dplyr::summarise(
+    summarise(
       clicks = sum(click_count, na.rm = TRUE),
       .by = target_url
     ) |>
-    dplyr::arrange(dplyr::desc(clicks)) |>
-    dplyr::slice(1:top_n) |>
-    dplyr::mutate(rank = dplyr::row_number(), .before = target_url)
+    arrange(desc(clicks)) |>
+    slice(1:top_n) |>
+    mutate(rank = row_number(), .before = target_url)
 }
 
 # Summarize BC Data Catalogue asset downloads by file and URL.
@@ -347,15 +347,15 @@ analyze_bcdc_click <- function(df, top_n = 20) {
 # Returns a downloads-ranked data frame.
 analyze_bcdc_asset <- function(df) {
   df |>
-    dplyr::filter(
-      stringr::str_detect(
+    filter(
+      str_detect(
         asset_url,
-        stringr::regex("catalogue\\.data\\.gov\\.bc\\.ca", ignore_case = TRUE)
+        regex("catalogue\\.data\\.gov\\.bc\\.ca", ignore_case = TRUE)
       )
     ) |>
-    dplyr::summarise(
+    summarise(
       downloads = sum(downloads, na.rm = TRUE),
       .by = c(asset_file, asset_url)
     ) |>
-    dplyr::arrange(dplyr::desc(downloads))
+    arrange(desc(downloads))
 }
