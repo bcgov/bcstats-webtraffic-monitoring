@@ -1,71 +1,33 @@
+# BC Stats Web Traffic Monitoring
+
 <!-- badges: start -->
 
-[![Lifecycle:Experimental](https://img.shields.io/badge/Lifecycle-Experimental-339999)](https://github.com/bcgov/repomountie/blob/master/doc/lifecycle-badges.md) [![License:Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/license/apache-2-0/)
+[![Lifecycle: Experimental](https://img.shields.io/badge/Lifecycle-Experimental-339999)](https://github.com/bcgov/repomountie/blob/master/doc/lifecycle-badges.md) [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/license/apache-2-0/)
 
 <!-- badges: end -->
 
-## Project Description
+This repository monitors web traffic across two reporting families:
 
-R code to fetch, summarize, and publish web analytics for BC Stats dashboards hosted on Shiny and monitored through Google Analytics 4.
+1. Shiny app usage and concurrency metrics
+2. Public web property traffic for BC Stats (CMS Lite) and Student Outcomes and Anti-Racism Data Act (WordPress)
 
-This repository contains **code only**. Raw data, derived tables, visuals, and rendered reports are written to secure LAN storage accessed through [`safepaths`](https://github.com/bcgov/safepaths).
+The repository is intentionally organized around source code, reports, and local-only generated outputs. Raw data, derived tables, and rendered reports are kept outside the Git repository on secure LAN/local storage whenever possible.
 
-## What the project does
+## Project purpose
 
-The current pipeline:
+The project pulls web traffic data from multiple sources and produces summary tables and Quarto dashboards that support operational reporting.
 
-- downloads raw GA4 usage data by day and ISO week
-- downloads shinyapps.io concurrency metrics
-- builds summary tables for usage, geography, technology, and downloads
-- creates executive-summary visuals and tables
-- renders a Quarto dashboard
-- archives the rendered dashboard HTML to the production reports folder
+### Project workflow
 
-## Repository workflow
+The repository contains two independent reporting pipelines: weekly monitoring of Shiny apps and monthly reporting for the public web properties. Both use source scripts and Quarto reports in Git, while raw data and generated outputs are stored on configured LAN paths rather than committed.
 
-The main scripts are:
+![BC Stats web traffic monitoring project workflows](assets/workflow.svg)
 
-- `R/00-setup.R`\
-  Loads packages, configures LAN paths, reads environment variables, authenticates to GA4 and shinyapps.io.
+### Shiny apps stream
 
-- `R/01a-get-ga-data.R`\
-  Full GA4 pull. Downloads and caches raw daily, weekly, geo, tech, and download-event data as `.rds` files.
+The Shiny dashboards pipeline downloads Google Analytics 4 data and shinyapps.io metrics, summarizes usage patterns, and renders a dashboard for the maintained apps.
 
-- `R/01b-get-shinyapps-data.R`\
-  Downloads shinyapps.io concurrency metrics for the maintained apps and saves them as `shinyapps_concurrency.rds`.
-
-- `R/01c-get-ga-data-weekly.R`\
-  Incremental weekly GA4 updater. Appends only new raw records and overwrites the cached `.rds` files.
-
-- `R/02-analyze-usage.R`\
-  Filters to the maintained dashboards and writes summary CSVs, including:
-
-  - `usage_summary.csv`
-  - `location_summary.csv`
-  - `tech_summary.csv`
-  - `device_summary.csv`
-  - `os_summary.csv`
-  - `browser_summary.csv`
-  - `download_summary.csv`
-  - `usage_comparison.csv`
-  - `weekly_usage.csv`
-  - `visits_minmax_summary.csv`
-
-- `R/03-analyze-concurrency.R`\
-  Summarizes concurrency metrics for shinyapps.io apps.
-
-- `R/04-executive-summary.R`\
-  Produces executive-summary CSV output and PNG visuals in `outputs/visuals/`.
-
-- `R/05-render-dashboard.R`\
-  Master weekly pipeline. Runs the incremental GA4 refresh, rebuilds summaries, renders `Report/dashboard.qmd`, and archives the HTML file into `outputs/reports/` with a week-based filename.
-
-- `Report/dashboard.qmd`\
-  Quarto dashboard that reads the generated CSV and RDS outputs and renders the reporting interface.
-
-## Dashboards currently tracked
-
-The usage analysis currently reports on these dashboards:
+Dashboards currently tracked:
 
 - LAEP
 - Student Outcomes
@@ -79,201 +41,203 @@ The usage analysis currently reports on these dashboards:
 - Interprovincial Migration
 - BC Retail Sales
 
-## Prerequisites
+Main scripts:
 
-- **R**: 4.0.0+
-- **VPN / network access**: required to reach the secure LAN path
-- **GA4 access**: service account email and JSON key file
-- **shinyapps.io access**: account name, token, and secret
-- **safepaths configuration**: required to resolve the LAN root folder
-- **Quarto**: required to render the dashboard
+- `R/00-setup.R` — package setup, GA/shinyapps auth, LAN path configuration
+- `R/apps-01-fetch-ga-history.R` — historical GA4 pull
+- `R/apps-02-fetch-ga-weekly.R` — incremental GA4 refresh
+- `R/apps-03-fetch-shinyapps.R` — shinyapps.io metrics pull
+- `R/apps-04-analyze-usage.R` — app usage summaries
+- `R/apps-05-analyze-concurrency.R` — app concurrency summaries
+- `R/apps-06-executive-summary.R` — summary tables and visuals
+- `R/apps-run-weekly-pipeline.R` — end-to-end weekly Shiny dashboard pipeline
+- `Report/shinyapps_dashboard.qmd` — Quarto dashboard for app usage metrics
 
-## Secure access and credentials
+### BC Stats public web traffic stream
 
-Secrets must never be committed.
+This stream covers the web traffic reporting for:
 
-Use a local-only configuration such as `~/.Renviron` or a separate file referenced by `EXTRA_RENVIRON_PATH`.
+- BC Stats (Statistics and Surveys)
+- Student Outcomes
+- Anti-Racism Data Act
 
-### Required environment variables
+The GDX source data is delivered as monthly data exports and is used to validate the reporting month, summarize traffic, and render a dashboard for these web properties.
 
-``` text
-SAFEPATHS_NETWORK_PATH
+Main scripts:
+
+- `R/gdx-run-monthly-pipeline.R` — overall monthly pipeline for the BC Stats public web dashboard
+- `R/gdx-01-fetch-s3.R` — downloads the selected source-data CSV files from S3
+- `R/gdx-02-analyze.R` — builds the monthly summary tables for the dashboard
+- `R/gdx-03-analyze-bcdc.R` — BCDC-focused analysis and dataset rankings
+- `R/functions/month-run-helpers.R` — shared month and validation helpers
+- `R/functions/gdx-web-analysis-functions.R` — analysis logic for the public web traffic datasets
+- `Report/gdx_web_dashboard.qmd` — dashboard for the BC Stats public web properties
+
+The GDX data package includes, for each site:
+
+- daily page view counts by URL
+- daily click counts by target URL
+- daily referring URL counts by site
+- daily platform counts by site
+- daily counts by province and country by site
+
+For the BC Stats property specifically, the package also includes:
+
+- daily asset download counts by asset URL
+- monthly site search terms
+- monthly Google search terms, including click count and impression count
+
+## Repository layout
+
+```text
+.
+├── R/
+│   ├── 00-setup.R
+│   ├── apps-01-fetch-ga-history.R
+│   ├── apps-02-fetch-ga-weekly.R
+│   ├── apps-03-fetch-shinyapps.R
+│   ├── apps-04-analyze-usage.R
+│   ├── apps-05-analyze-concurrency.R
+│   ├── apps-06-executive-summary.R
+│   ├── apps-run-weekly-pipeline.R
+│   ├── gdx-01-fetch-s3.R
+│   ├── gdx-02-analyze.R
+│   ├── gdx-03-analyze-bcdc.R
+│   ├── gdx-run-monthly-pipeline.R
+│   └── functions/
+│       ├── gdx-web-analysis-functions.R
+│       └── month-run-helpers.R
+├── Report/
+│   ├── shinyapps_dashboard.qmd
+│   └── gdx_web_dashboard.qmd
+├── docs/
+│   └── (runbooks, notes, and supporting project documentation)
+├── README.md
+├── .gitignore
+├── .Renviron.example
+├── LICENSE
+├── CODE_OF_CONDUCT.md
+├── CONTRIBUTING.md
+└── .Rprofile (if present locally)
+```
+
+## Local-only data and secrets
+
+The repository stores source code, not the actual working data or credentials.
+
+Local-only files should remain outside the Git-tracked repo or be ignored by Git. In practice:
+
+- credentials live in `.Renviron` or another local secret file
+- the GA service account JSON file is not committed
+- raw data and generated tables live in LAN/local storage or local output folders
+- rendered HTML dashboards are treated as disposable local outputs unless intentionally versioned
+
+## Required local configuration
+
+A template is included in `.Renviron.example`.
+
+Copy it to `.Renviron` and populate the values needed for your environment.
+
+### Required variables
+
+```text
 GA_SERVICE_EMAIL
 GA_SERVICE_KEY
 SHINY_ACC_NAME
 SHINY_TOKEN
 SHINY_SECRET
+AWS_ACCESS_KEY_ID
+AWS_SECRET_ACCESS_KEY
+AWS_DEFAULT_REGION
+BCSTATS_S3_BUCKET
+BCSTATS_S3_PREFIX
+SAFEPATHS_NETWORK_PATH
 ```
 
-### Optional environment variables
+### Optional variables
 
-``` text
+```text
 GA_PROPERTY_ID
 GA_DATE_START
 GA_DATE_END
 EXTRA_RENVIRON_PATH
+GDX_TARGET_MONTH
+BCSTATS_S3_SOURCE_SUBFOLDER
+BCSTATS_S3_KEY_PATTERN
+GDX_USE_EXPLICIT_S3_SELECTION
+GDX_DASHBOARD_MAX_MONTH
 ```
 
-### Defaults used in code
+## How to use this repo
 
-If optional values are not set, the scripts currently default to:
+### Shiny apps stream
 
-- `GA_DATE_START = 2024-01-01`
-- `GA_DATE_END = Sys.Date() - 1`
+Use the Shiny apps pipeline when you want to refresh the GA4 and shinyapps.io usage reporting for the maintained apps.
 
-`GA_SERVICE_KEY` must point to an existing GA service-account JSON file.
+Run the workflow in sequence:
 
-## Data sources
-
-- **Google Analytics 4 API** via `googleAnalyticsR`
-- **shinyapps.io metrics API** via `rsconnect::showMetrics()`
-
-## LAN storage structure
-
-All raw data and outputs are written under:
-
-``` text
-{LAN_FOLDER}/0. Misc/Data Science Tooling/web-hosting-and-dashboards/shinyapps_webtraffic_monitoring/
-├── data/
-│   ├── daily_usage_raw.rds
-│   ├── weekly_usage_raw.rds
-│   ├── geo_data_raw.rds
-│   ├── tech_data_raw.rds
-│   ├── download_data_raw.rds
-│   └── shinyapps_concurrency.rds
-└── outputs/
-    ├── reports/
-    ├── tables/
-    └── visuals/
+```r
+source("R/apps-01-fetch-ga-history.R")
+source("R/apps-03-fetch-shinyapps.R")
+source("R/apps-04-analyze-usage.R")
+source("R/apps-05-analyze-concurrency.R")
+source("R/apps-06-executive-summary.R")
+source("R/apps-run-weekly-pipeline.R")
 ```
 
-## Installation
+The overall run script handles the weekly refresh and renders the dashboard for the app reporting stream.
 
-Install the packages used by the current scripts:
-
-``` r
-install.packages(c(
-  "googleAnalyticsR",
-  "tidyverse",
-  "lubridate",
-  "zoo",
-  "janitor",
-  "slider",
-  "rsconnect",
-  "glue",
-  "ggplot2",
-  "forcats",
-  "quarto",
-  "flexdashboard",
-  "plotly",
-  "DT",
-  "scales",
-  "knitr"
-))
-
-remotes::install_github("bcgov/safepaths")
+```r
+quarto::quarto_render("Report/shinyapps_dashboard.qmd")
 ```
 
-## Typical usage
+### BC Stats public web traffic stream
 
-### One-time or full refresh
+Use this workflow when you want to refresh the public web traffic dashboard for:
 
-Run the raw-data collection and analysis scripts in sequence:
+- BC Stats (Statistics and Surveys)
+- Student Outcomes
+- Anti-Racism Data Act
 
-``` r
-source("R/01a-get-ga-data.R")
-source("R/01b-get-shinyapps-data.R")
-source("R/02-analyze-usage.R")
-source("R/03-analyze-concurrency.R")
-source("R/04-executive-summary.R")
-quarto::quarto_render("Report/dashboard.qmd")
-```
+Run the monthly pipeline:
 
-### Weekly production update
-
-Run the master pipeline:
-
-``` r
-source("R/05-render-dashboard.R")
+```r
+source("R/gdx-run-monthly-pipeline.R")
 ```
 
 This script:
 
-1.  refreshes GA4 raw data incrementally
-2.  rebuilds summary tables
-3.  renders `Report/dashboard.qmd`
-4.  copies the rendered HTML into `outputs/reports/`
-5.  names the archived report as `Traffic_Snapshot_Week_Of_YYYY-MM-DD.html`
+1. resolves the target reporting month
+2. selects the correct source-data files from S3
+3. downloads the monthly data exports
+4. validates the report families and month
+5. writes the monthly output tables
+6. renders `Report/gdx_web_dashboard.qmd`
 
-## Outputs
+This is the correct path for the public web traffic dashboard, not the Shiny app workflow.
 
-Typical outputs include:
+## Documentation and runbooks
 
-### Tables
-
-- weekly usage summaries
-- recent week and recent month comparison metrics
-- rolling averages
-- geography summaries
-- device, operating system, and browser summaries
-- file download summaries
-- app comparison rankings
-- visit/time/download summary tables
-- concurrency summaries
-
-### Visuals
-
-Generated by `R/04-executive-summary.R`:
-
-- `visits_trend_plot.png`
-- `visits_trend_faceted_plot.png`
-- `visits_minmax_plot.png`
-- `visits_minmax_plot_high.png`
-- `visits_minmax_plot_low.png`
-- `max_concurrent_plot.png`
-
-### Rendered report
-
-- `Report/dashboard.html` during render
-- archived HTML report in `outputs/reports/`
-
-## Notes for code review and development
-
-- This repository stores only code; do not commit LAN data or credentials.
-- `R/01c-get-ga-data-weekly.R` assumes the raw `.rds` cache files already exist.
-- The Quarto dashboard reads generated files from LAN storage, not from the repository itself.
-- The dashboard can be rendered directly with:
-
-``` r
-quarto::quarto_render("Report/dashboard.qmd")
-```
-
-## Guiding principles
-
-1.  This GitHub repository stores only code.
-2.  Data and outputs reside on secure LAN storage.
-3.  Credentials are supplied locally and must not be committed.
-4.  The analysis is intended to support transparent, reproducible reporting for dashboard usage.
+Use `docs/` for operational notes, runbooks, and explanation of data-source assumptions. Keep the project narrative in the README and keep implementation details in the scripts and runbooks.
 
 ## Contributing
 
-See [CONTRIBUTING](CONTRIBUTING.md).
-
-This project follows the [Contributor Code of Conduct](CODE_OF_CONDUCT.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for how to propose changes. This project follows the [Contributor Code of Conduct](CODE_OF_CONDUCT.md). Keep generated data and credentials out of commits.
 
 ## Contact
 
-For access questions or the `safepaths` configuration key, contact:
-
-- Zhijia Ju: https://github.com/Anakin2009
-- Or open an issue in this repository
+For access questions or help with the `safepaths` configuration key, contact [Zhijia Ju](https://github.com/Anakin2009) or [open an issue](https://github.com/bcgov/bcstats-webtraffic-monitoring/issues).
 
 ## License
 
 Copyright 2026 Province of British Columbia
 
-Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the License. You may obtain a copy of the License at
+Licensed under the Apache License, Version 2.0 (the "License"); you may not use this project except in compliance with the License. You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0.
 
-http://www.apache.org/licenses/LICENSE-2.0
+Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the [LICENSE](LICENSE) file for the specific language governing permissions and limitations under the License.
 
-Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions and limitations under the License.
+## Notes
+
+- This repository stores code, not production data.
+- Data access depends on local credentials and secure paths.
+- The scripts are intentionally the source of truth for the analyses; documentation should explain how to run them, not duplicate their logic.

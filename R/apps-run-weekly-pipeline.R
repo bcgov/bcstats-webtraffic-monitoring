@@ -1,3 +1,17 @@
+# Copyright 2026 Province of British Columbia
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 # Purpose: Master pipeline script. Fetches new data, analyzes usage,
 # renders the dashboard, and archives the report to the production folder.
 
@@ -7,10 +21,10 @@ source("R/00-setup.R")
 # STEP 1 & 2: FETCH NEW DATA AND GENERATE SUMMARIES
 # ==============================================================================
 message("Step 1: Fetching latest GA4 data...")
-source("R/01c-get-ga-data-weekly.R")
+source("R/apps-02-fetch-ga-weekly.R")
 
 message("Step 2: Analyzing usage and updating summary tables...")
-source("R/02-analyze-usage.R")
+source("R/apps-04-analyze-usage.R")
 
 
 # ==============================================================================
@@ -48,7 +62,7 @@ date_suffix <- format(latest_week_date, "%Y-%m-%d")
 message("Step 4: Rendering Quarto dashboard...")
 
 # This generates the default "Report/dashboard.html"
-quarto_render("Report/dashboard.qmd")
+quarto_render("Report/shinyapps_dashboard.qmd")
 
 
 # ==============================================================================

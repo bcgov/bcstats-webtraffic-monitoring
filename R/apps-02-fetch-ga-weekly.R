@@ -1,3 +1,17 @@
+# Copyright 2026 Province of British Columbia
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 # Purpose: Weekly Update. Download raw data from GA4 and save it locally (caching)
 
 # Purpose: Weekly incremental GA4 raw-data update into raw data files.
@@ -9,8 +23,10 @@ if (!exists("required_packages")) {
 end_date <- as.character(Sys.Date() - 1)
 
 # set weekly end date to the last completed Sunday (ISO week default: Mon-Sun)
+# `%u` returns 1..7 (Mon..Sun). Use %% 7 so Sunday maps to 0 days back,
+# otherwise Monday runs skip the most recent completed week.
 day_of_week_iso <- as.integer(format(as.Date(end_date), "%u")) # 1=Mon ... 7=Sun
-end_date_weekly <- as.character(as.Date(end_date) - day_of_week_iso)
+end_date_weekly <- as.character(as.Date(end_date) - (day_of_week_iso %% 7L))
 
 # Helper function to append and deduplicate rows
 append_distinct <- function(existing, new_data, key_cols) {
@@ -19,7 +35,7 @@ append_distinct <- function(existing, new_data, key_cols) {
     arrange(across(any_of(c("date", "isoYearIsoWeek"))))
 }
 
-# read current base data from 01a-get-ga-data.R
+# read current base data from apps-01-fetch-ga-history.R
 daily_usage_raw <- readRDS(file.path(DATA_RAW, "daily_usage_raw.rds"))
 geo_data_raw <- readRDS(file.path(DATA_RAW, "geo_data_raw.rds"))
 tech_data_raw <- readRDS(file.path(DATA_RAW, "tech_data_raw.rds"))
@@ -212,7 +228,9 @@ jan4 <- as.Date(sprintf("%s-01-04", substr(last_week, 1, 4)))
 #    - if last_week is YYYY18, this lands on Monday of ISO week 19
 # 4) as.character(...) keeps date format consistent for ga_data(date_range = ...)
 weekly_start <- as.character(
-  jan4 - (as.integer(format(jan4, "%u")) - 1L) + as.integer(substr(last_week, 5, 6)) * 7L
+  jan4 -
+    (as.integer(format(jan4, "%u")) - 1L) +
+    as.integer(substr(last_week, 5, 6)) * 7L
 )
 
 weekly_new <- if (as.Date(weekly_start) <= as.Date(end_date_weekly)) {

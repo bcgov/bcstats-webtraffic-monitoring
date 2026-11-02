@@ -10,7 +10,7 @@ format:
     embed-resources: true
     nav-buttons:
       - icon: github
-        href: https://github.com/bcgov/shinyapps-webtraffic-monitoring
+        href: https://github.com/bcgov/bcstats-webtraffic-monitoring
 ---
 
 <!-- 
